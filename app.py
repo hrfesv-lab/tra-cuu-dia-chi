@@ -3,25 +3,24 @@ import pandas as pd
 import re
 
 # ==========================================
-# 1. NẠP DỮ LIỆU (2 LỚP: XÃ & TỈNH)
+# ==========================================
+# 1. NẠP DỮ LIỆU (Đã gỡ bỏ ẩn lỗi)
 # ==========================================
 @st.cache_data
 def load_data():
-    # Load file cấp Xã
-    try:
-        df_xa = pd.read_csv("Master_Database_63_Tinh.csv")
-        df_xa['Length'] = df_xa['Địa chỉ CŨ'].astype(str).apply(len)
-        df_xa = df_xa.sort_values(by='Length', ascending=False)
-    except Exception:
-        df_xa = pd.DataFrame(columns=['Địa chỉ CŨ', 'Địa chỉ MỚI', 'Trạng thái'])
+    # 1. Nạp file Xã
+    df_xa = pd.read_csv("Master_Database_63_Tinh.csv")
+    df_xa['Length'] = df_xa['Địa chỉ CŨ'].astype(str).apply(len)
+    df_xa = df_xa.sort_values(by='Length', ascending=False)
         
-    # Load file cấp Tỉnh
-    try:
-        df_tinh = pd.read_csv("Tinh_Huyen.csv")
-        df_tinh['Length'] = df_tinh['Địa chỉ CŨ'].astype(str).apply(len)
-        df_tinh = df_tinh.sort_values(by='Length', ascending=False)
-    except Exception:
-        df_tinh = pd.DataFrame(columns=['Địa chỉ CŨ', 'Địa chỉ MỚI', 'Trạng thái'])
+    # 2. Nạp file Tỉnh (Bỏ try...except để nếu sai tên file máy sẽ báo lỗi đỏ ngay)
+    df_tinh = pd.read_csv("Tinh_Huyen.csv")
+    
+    # THỦ THUẬT: Xóa chữ "tỉnh" và "thành phố" trong DB để người dùng nhập kiểu gì cũng nhận diện được
+    df_tinh['Địa chỉ CŨ'] = df_tinh['Địa chỉ CŨ'].str.replace(r'^(tỉnh|thành phố)\s+', '', regex=True, flags=re.IGNORECASE)
+    
+    df_tinh['Length'] = df_tinh['Địa chỉ CŨ'].astype(str).apply(len)
+    df_tinh = df_tinh.sort_values(by='Length', ascending=False)
         
     return df_xa, df_tinh
 
