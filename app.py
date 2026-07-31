@@ -35,7 +35,7 @@ def load_data():
         df['huyen_norm'] = df['Quận/huyện'].apply(normalize)
         df['tinh_norm'] = df['Tỉnh cũ'].apply(normalize)
         
-        # Sắp xếp độ dài Xã cũ giảm dần để ưu tiên ghép từ dài trước (tránh P.2 đè P.22)
+        # Sắp xếp độ dài Xã cũ giảm dần để ưu tiên ghép từ dài trước
         df['Length'] = df['Tên Xã cũ'].apply(len)
         df = df.sort_values(by='Length', ascending=False)
         return df
@@ -52,12 +52,10 @@ def convert_address(query):
     if not query or df.empty: return query, "Lỗi hoặc Trống"
     query_lower = query.lower()
     
-    # BƯỚC 1: TÌM CÁC DÒNG CÓ KHẢ NĂNG KHỚP
     matches = []
     for _, row in df.iterrows():
         xa_cu = str(row['Tên Xã cũ']).lower()
         if xa_cu in query_lower:
-            # Ngăn chặn lỗi ghi đè (VD: Phường 2 lọt vào Phường 22)
             start_idx = query_lower.find(xa_cu)
             end_idx = start_idx + len(xa_cu)
             if end_idx < len(query_lower) and query_lower[end_idx].isalnum():
@@ -67,40 +65,33 @@ def convert_address(query):
     if not matches:
         return query, "Không có sáp nhập / Giữ nguyên"
         
-    # BƯỚC 2: CHẤM ĐIỂM ĐỂ CHỌN KẾT QUẢ ĐÚNG NHẤT (Nếu trùng tên Xã)
     best_match = matches[0]
     if len(matches) > 1:
         max_score = -1
         for row in matches:
             score = 0
-            if row['huyen_norm'] in query_lower: score += 2 # Khớp Huyện +2 điểm
-            if row['tinh_norm'] in query_lower: score += 1  # Khớp Tỉnh +1 điểm
+            if row['huyen_norm'] in query_lower: score += 2 
+            if row['tinh_norm'] in query_lower: score += 1  
             if score > max_score:
                 max_score = score
                 best_match = row
 
-    # BƯỚC 3: THỰC HIỆN "PHẪU THUẬT" THAY THẾ CHUỖI
     out_addr = query
-    # 3.1 Đổi tên Xã
     pattern_xa = re.compile(re.escape(best_match['Tên Xã cũ']), re.IGNORECASE)
     out_addr = pattern_xa.sub(best_match['Tên Xã mới'], out_addr)
     
-    # 3.2 Xóa tên Huyện cũ (Bao gồm cả dấu phẩy thừa xung quanh)
     huyen_cu = best_match['Quận/huyện']
     huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu) + r'\s*[,]?\s*'
     out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
     
-    # 3.3 Đổi tên Tỉnh (nếu có khác biệt)
     tinh_cu = best_match['Tỉnh cũ']
     tinh_moi = best_match['Tỉnh, thành phố']
     if tinh_cu.lower() != tinh_moi.lower():
         pattern_tinh = re.compile(re.escape(tinh_cu), re.IGNORECASE)
         out_addr = pattern_tinh.sub(tinh_moi, out_addr)
         
-    # Làm sạch dấu phẩy thừa do việc xóa Huyện để lại
     out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
     
-    # Ghi chú tình trạng
     status = str(best_match['Ghi chú'])
     note = f"Đổi: {best_match['Tên Xã cũ']} ➡️ {best_match['Tên Xã mới']}"
     if "một phần" in status.lower():
@@ -112,7 +103,7 @@ def convert_address(query):
 # 3. GIAO DIỆN WEB
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
-st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ (Chuẩn Data Mới)")
+st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ")
 st.markdown("Hệ thống sử dụng Data chuẩn. Các địa chỉ thuộc diện sáp nhập sẽ được tự động đổi tên Xã/Phường và gỡ bỏ cấp Huyện.")
 
 col1, col2 = st.columns(2)
@@ -121,7 +112,7 @@ with col1:
     input_text = st.text_area(
         "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
         height=300, 
-        placeholder="Ví dụ:\n113 Võ Duy Ninh, Phường 22, Quận Bình Thạnh, Thành phố Hồ Chí Minh\nKhóm 2, Phường Trúc Bạch, Quận Ba Đình, Thành phố Hà Nội"
+        placeholder="Ví dụ:\n113 Võ Duy Ninh, Phường 22, Quận Bình Thạnh, Thành phố Hồ Chí Minh"
     )
     search_button = st.button("🔄 Chuyển đổi ngay", type="primary", use_container_width=True)
 
@@ -133,8 +124,8 @@ with col2:
             
             for query in queries:
                 new_addr, status_note = convert_address(query)
+                # Đã loại bỏ cột "Địa chỉ bạn nhập" theo yêu cầu
                 results.append({
-                    "Địa chỉ bạn nhập": query,
                     "Địa chỉ SAU chuyển đổi": new_addr,
                     "Ghi chú chi tiết": status_note
                 })
