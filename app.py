@@ -3,100 +3,125 @@ import pandas as pd
 import re
 
 # ==========================================
-# ==========================================
-# 1. NẠP DỮ LIỆU (Đã gỡ bỏ ẩn lỗi)
+# 1. NẠP VÀ LÀM SẠCH DATABASE CHUẨN
 # ==========================================
 @st.cache_data
 def load_data():
-    # 1. Nạp file Xã
-    df_xa = pd.read_csv("Master_Database_63_Tinh.csv")
-    df_xa['Length'] = df_xa['Địa chỉ CŨ'].astype(str).apply(len)
-    df_xa = df_xa.sort_values(by='Length', ascending=False)
+    try:
+        # Đọc sheet "Tổng hợp_không merge" và lấy dòng số 2 làm tiêu đề
+        df = pd.read_excel('BangChuyendoiĐVHCmoi_cu_final.xlsx', sheet_name='Tổng hợp_không merge ', header=1)
         
-    # 2. Nạp file Tỉnh (Bỏ try...except để nếu sai tên file máy sẽ báo lỗi đỏ ngay)
-    df_tinh = pd.read_csv("Tinh_Huyen.csv")
-    
-    # THỦ THUẬT: Xóa chữ "tỉnh" và "thành phố" trong DB để người dùng nhập kiểu gì cũng nhận diện được
-    df_tinh['Địa chỉ CŨ'] = df_tinh['Địa chỉ CŨ'].str.replace(r'^(tỉnh|thành phố)\s+', '', regex=True, flags=re.IGNORECASE)
-    
-    df_tinh['Length'] = df_tinh['Địa chỉ CŨ'].astype(str).apply(len)
-    df_tinh = df_tinh.sort_values(by='Length', ascending=False)
+        # Bỏ qua các dòng trống
+        df = df.dropna(subset=['Tên Xã cũ', 'Tên Xã mới'])
         
-    return df_xa, df_tinh
+        # Hàm xóa các mã số trong ngoặc đơn, VD: "Quận 3 (770)" -> "Quận 3"
+        def clean_code(text):
+            if pd.isna(text): return ""
+            return re.sub(r'\s*\(\d+\)', '', str(text)).strip()
+            
+        df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
+        df['Quận/huyện'] = df['Quận/huyện'].apply(clean_code)
+        df['Tỉnh cũ'] = df['Tỉnh cũ'].apply(clean_code)
+        df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
+        df['Tỉnh, thành phố'] = df['Tỉnh, thành phố'].apply(clean_code)
+        
+        # Tạo các cột normalize để thuật toán dễ so sánh
+        def normalize(text):
+            text = str(text).lower()
+            text = re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.|tx\.|thị xã)\s+', '', text)
+            return text.strip()
+            
+        df['xa_norm'] = df['Tên Xã cũ'].apply(normalize)
+        df['huyen_norm'] = df['Quận/huyện'].apply(normalize)
+        df['tinh_norm'] = df['Tỉnh cũ'].apply(normalize)
+        
+        # Sắp xếp độ dài Xã cũ giảm dần để ưu tiên ghép từ dài trước (tránh P.2 đè P.22)
+        df['Length'] = df['Tên Xã cũ'].apply(len)
+        df = df.sort_values(by='Length', ascending=False)
+        return df
+    except Exception as e:
+        st.error(f"Lỗi đọc file Excel: {e}")
+        return pd.DataFrame()
 
-df_xa, df_tinh = load_data()
+df = load_data()
 
 # ==========================================
+# 2. THUẬT TOÁN ĐỊNH VỊ VÀ CHUYỂN ĐỔI
 # ==========================================
-# 2. HÀM XỬ LÝ LÕI (THAY THẾ CHUẨN XÁC)
-# ==========================================
-def replace_entity(address, df_ref):
-    addr_lower = address.lower()
-    new_addr = address
-    note = ""
-    
-    for _, row in df_ref.iterrows():
-        old_place = str(row['Địa chỉ CŨ'])
-        old_place_lower = old_place.lower()
-        
-        if old_place_lower in addr_lower:
-            idx = addr_lower.find(old_place_lower)
-            end_idx = idx + len(old_place_lower)
-            
-            if end_idx < len(addr_lower) and addr_lower[end_idx].isalnum():
-                continue 
-            
-            pattern = re.compile(re.escape(old_place), re.IGNORECASE)
-            new_addr = pattern.sub(str(row['Địa chỉ MỚI']), new_addr)
-            
-            note = f"Đổi {old_place} ➡️ {row['Địa chỉ MỚI']}"
-            if "một phần" in str(row.get('Trạng thái', '')).lower():
-                note += " (⚠️ Sáp nhập 1 phần)"
-            break
-            
-    return new_addr, note
-
 def convert_address(query):
-    if not query:
-        return query, "Trống"
+    if not query or df.empty: return query, "Lỗi hoặc Trống"
+    query_lower = query.lower()
     
-    current_addr = query
-    notes = []
-    
-    # 🔥 BƯỚC 1: DÒ VÀ ĐỔI TỈNH/HUYỆN TRƯỚC
-    if not df_tinh.empty:
-        current_addr, note_tinh = replace_entity(current_addr, df_tinh)
-        if note_tinh:
-            notes.append(note_tinh)
+    # BƯỚC 1: TÌM CÁC DÒNG CÓ KHẢ NĂNG KHỚP
+    matches = []
+    for _, row in df.iterrows():
+        xa_cu = str(row['Tên Xã cũ']).lower()
+        if xa_cu in query_lower:
+            # Ngăn chặn lỗi ghi đè (VD: Phường 2 lọt vào Phường 22)
+            start_idx = query_lower.find(xa_cu)
+            end_idx = start_idx + len(xa_cu)
+            if end_idx < len(query_lower) and query_lower[end_idx].isalnum():
+                continue 
+            matches.append(row)
             
-    # 🔥 BƯỚC 2: DÒ VÀ ĐỔI XÃ/PHƯỜNG SAU
-    if not df_xa.empty:
-        current_addr, note_xa = replace_entity(current_addr, df_xa)
-        if note_xa:
-            notes.append(note_xa)
-            
-    # Tổng hợp ghi chú (Hiển thị Tỉnh trước, Xã sau cho thuận mắt)
-    if not notes:
-        final_note = "Giữ nguyên"
-    else:
-        final_note = " | ".join(notes)
+    if not matches:
+        return query, "Không có sáp nhập / Giữ nguyên"
         
-    return current_addr, final_note
+    # BƯỚC 2: CHẤM ĐIỂM ĐỂ CHỌN KẾT QUẢ ĐÚNG NHẤT (Nếu trùng tên Xã)
+    best_match = matches[0]
+    if len(matches) > 1:
+        max_score = -1
+        for row in matches:
+            score = 0
+            if row['huyen_norm'] in query_lower: score += 2 # Khớp Huyện +2 điểm
+            if row['tinh_norm'] in query_lower: score += 1  # Khớp Tỉnh +1 điểm
+            if score > max_score:
+                max_score = score
+                best_match = row
+
+    # BƯỚC 3: THỰC HIỆN "PHẪU THUẬT" THAY THẾ CHUỖI
+    out_addr = query
+    # 3.1 Đổi tên Xã
+    pattern_xa = re.compile(re.escape(best_match['Tên Xã cũ']), re.IGNORECASE)
+    out_addr = pattern_xa.sub(best_match['Tên Xã mới'], out_addr)
+    
+    # 3.2 Xóa tên Huyện cũ (Bao gồm cả dấu phẩy thừa xung quanh)
+    huyen_cu = best_match['Quận/huyện']
+    huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu) + r'\s*[,]?\s*'
+    out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
+    
+    # 3.3 Đổi tên Tỉnh (nếu có khác biệt)
+    tinh_cu = best_match['Tỉnh cũ']
+    tinh_moi = best_match['Tỉnh, thành phố']
+    if tinh_cu.lower() != tinh_moi.lower():
+        pattern_tinh = re.compile(re.escape(tinh_cu), re.IGNORECASE)
+        out_addr = pattern_tinh.sub(tinh_moi, out_addr)
+        
+    # Làm sạch dấu phẩy thừa do việc xóa Huyện để lại
+    out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
+    
+    # Ghi chú tình trạng
+    status = str(best_match['Ghi chú'])
+    note = f"Đổi: {best_match['Tên Xã cũ']} ➡️ {best_match['Tên Xã mới']}"
+    if "một phần" in status.lower():
+        note += " (⚠️ Có sáp nhập 1 phần)"
+        
+    return out_addr, note
 
 # ==========================================
 # 3. GIAO DIỆN WEB
 # ==========================================
-st.set_page_config(page_title="Chuyển đổi Địa chỉ", page_icon="🏛️", layout="wide")
-st.title("🏛️ CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ HÀNH CHÍNH")
-st.markdown("Nhập toàn bộ địa chỉ cũ vào bên trái. Máy sẽ tự động quy đổi tên Xã/Phường và Tỉnh/Thành phố.")
+st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
+st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ (Chuẩn Data Mới)")
+st.markdown("Hệ thống sử dụng Data chuẩn. Các địa chỉ thuộc diện sáp nhập sẽ được tự động đổi tên Xã/Phường và gỡ bỏ cấp Huyện.")
 
 col1, col2 = st.columns(2)
 
 with col1:
     input_text = st.text_area(
-        "Nhập địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
+        "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
         height=300, 
-        placeholder="Ví dụ:\n113 Võ Duy Ninh, Phường 22, Quận Bình Thạnh, Thành phố Hồ Chí Minh\nKhu công nghiệp A, tỉnh Hà Tây"
+        placeholder="Ví dụ:\n113 Võ Duy Ninh, Phường 22, Quận Bình Thạnh, Thành phố Hồ Chí Minh\nKhóm 2, Phường Trúc Bạch, Quận Ba Đình, Thành phố Hà Nội"
     )
     search_button = st.button("🔄 Chuyển đổi ngay", type="primary", use_container_width=True)
 
