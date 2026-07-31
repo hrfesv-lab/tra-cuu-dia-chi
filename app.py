@@ -100,6 +100,7 @@ def convert_address(query):
     return out_addr, note
 
 # ==========================================
+# ==========================================
 # 3. GIAO DIỆN WEB
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
@@ -121,25 +122,36 @@ with col2:
         if input_text.strip():
             queries = [q.strip() for q in input_text.split('\n') if q.strip()]
             results = []
+            output_lines = []
             
             for query in queries:
                 new_addr, status_note = convert_address(query)
-                # Đã loại bỏ cột "Địa chỉ bạn nhập" theo yêu cầu
+                # Dữ liệu để xuất ra file CSV (Vẫn giữ ghi chú để bạn tra cứu nếu cần)
                 results.append({
                     "Địa chỉ SAU chuyển đổi": new_addr,
                     "Ghi chú chi tiết": status_note
                 })
+                # Dữ liệu để hiển thị ra màn hình (Chỉ lấy địa chỉ mới cho gọn)
+                output_lines.append(new_addr)
             
+            # 1. Hiển thị kết quả bằng Text Area giống hệt bên trái
+            output_str = "\n".join(output_lines)
+            st.text_area(
+                "Danh sách địa chỉ SAU chuyển đổi:", 
+                value=output_str, 
+                height=300
+            )
+            
+            # 2. Nút tải màu đỏ (Thêm type="primary")
             df_results = pd.DataFrame(results)
-            st.dataframe(df_results, use_container_width=True)
-            
             csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
                 label="📥 Tải file kết quả (CSV)",
                 data=csv_data,
                 file_name="Ket_Qua_Dia_Chi_Moi.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                type="primary"
             )
         else:
             st.warning("Vui lòng nhập địa chỉ vào ô bên trái.")
