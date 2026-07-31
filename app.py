@@ -11,14 +11,12 @@ def load_data():
         df = pd.read_excel('BangChuyendoiĐVHCmoi_cu_final.xlsx', sheet_name='Tổng hợp_không merge ', header=1)
         df = df.dropna(subset=['Tên Xã cũ', 'Tên Xã mới'])
         
-        # Hàm xóa mã số trong ngoặc (Ví dụ: "Quận 3 (770)" -> "Quận 3")
         def clean_code(text):
             if pd.isna(text): return ""
             return re.sub(r'\s*\(\d+\)', '', str(text)).strip()
             
         df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
         
-        # Đề phòng tên cột Huyện bị đổi trong các phiên bản Excel khác nhau
         huyen_col = 'Quận/huyện cũ' if 'Quận/huyện cũ' in df.columns else 'Quận/huyện'
         df['Huyện cũ'] = df[huyen_col].apply(clean_code)
         
@@ -26,7 +24,6 @@ def load_data():
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
         
-        # Sắp xếp độ dài Xã cũ giảm dần
         df['Length'] = df['Tên Xã cũ'].apply(len)
         df = df.sort_values(by='Length', ascending=False)
         return df
@@ -36,71 +33,80 @@ def load_data():
 
 df = load_data()
 
+# Tạo một bảng riêng chỉ chứa danh sách Tỉnh để phục vụ Bước 1
+if not df.empty:
+    df_tinh = df[['Tỉnh cũ', 'Tỉnh mới']].drop_duplicates()
+else:
+    df_tinh = pd.DataFrame()
+
 # ==========================================
-# 2. THUẬT TOÁN ĐỊNH VỊ VÀ CHUYỂN ĐỔI 
+# 2. THUẬT TOÁN THEO FLOW CHUẨN
 # ==========================================
 def convert_address(query):
     if not query or df.empty: return query, ""
-    query_lower = query.lower()
+    
+    # Lưu lại chuỗi gốc viết thường để làm bộ đối chiếu (không bị ảnh hưởng khi cắt ghép)
+    original_query_lower = query.lower()
     out_addr = query
     notes = []
     
-    # Hàm kiểm tra từ khóa (Có chặn boundary để tránh "Phường 2" đè vào "Phường 22")
     def is_in_text(word, text):
+        if not word: return False
         idx = text.find(word)
         if idx == -1: return False
         end_idx = idx + len(word)
+        # Chặn word boundary để "Phường 2" không đè "Phường 22"
         if end_idx < len(text) and text[end_idx].isalnum():
             return False
         return True
 
-    # BƯỚC 1: ĐIỀU KIỆN KIÊN QUYẾT (Chuỗi nhập vào phải chứa CẢ Xã cũ VÀ Huyện cũ)
+    # 🔥 BƯỚC 1: DÒ TỈNH CŨ -> ĐỔI TỈNH MỚI
+    for _, row in df_tinh.iterrows():
+        tinh_cu = str(row['Tỉnh cũ'])
+        if is_in_text(tinh_cu.lower(), original_query_lower):
+            tinh_moi = str(row['Tỉnh mới'])
+            if tinh_cu.lower() != tinh_moi.lower():
+                out_addr = re.sub(re.escape(tinh_cu), tinh_moi, out_addr, flags=re.IGNORECASE)
+                notes.append(f"Tỉnh: {tinh_cu} ➡️ {tinh_moi}")
+            break # Tìm thấy và xử lý xong Tỉnh thì ngắt vòng lặp
+
+    # 🔥 BƯỚC 2: DÒ (TỈNH CŨ + HUYỆN CŨ + XÃ CŨ) -> ĐỔI XÃ MỚI
     matches = []
     for _, row in df.iterrows():
         xa_cu = str(row['Tên Xã cũ']).lower()
         huyen_cu = str(row['Huyện cũ']).lower()
+        tinh_cu = str(row['Tỉnh cũ']).lower()
         
-        if is_in_text(xa_cu, query_lower) and is_in_text(huyen_cu, query_lower):
+        # Bắt buộc chuỗi nhập vào phải chứa CẢ 3 yếu tố
+        if is_in_text(tinh_cu, original_query_lower) and \
+           is_in_text(huyen_cu, original_query_lower) and \
+           is_in_text(xa_cu, original_query_lower):
             matches.append(row)
             
-    if not matches:
-        return query, "Giữ nguyên (Hoặc bạn nhập thiếu Quận/Huyện cũ)"
+    if matches:
+        best_match = matches[0] # Lấy kết quả đầu tiên thỏa mãn kiềng 3 chân
         
-    # Nếu trùng (hiếm), ưu tiên dòng khớp luôn cả Tỉnh cũ
-    best_match = matches[0]
-    if len(matches) > 1:
-        for row in matches:
-            if is_in_text(str(row['Tỉnh cũ']).lower(), query_lower):
-                best_match = row
-                break
-                
-    # BƯỚC 2: TIẾN HÀNH THAY THẾ THEO ĐÚNG FLOW
-    
-    # 2.1 - Check và Đổi Tỉnh (Nếu có nhập tỉnh cũ và tỉnh có đổi tên)
-    tinh_cu = best_match['Tỉnh cũ']
-    tinh_moi = best_match['Tỉnh mới']
-    if is_in_text(tinh_cu.lower(), query_lower) and tinh_cu.lower() != tinh_moi.lower():
-        out_addr = re.sub(re.escape(tinh_cu), tinh_moi, out_addr, flags=re.IGNORECASE)
-        notes.append(f"Tỉnh: {tinh_cu} ➡️ {tinh_moi}")
+        # 2.1 - Cắt bỏ Huyện cũ (Kèm dấu phẩy)
+        huyen_cu_real = best_match['Huyện cũ']
+        huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu_real) + r'\s*[,]?\s*'
+        out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
+        notes.append(f"Bỏ: {huyen_cu_real}")
         
-    # 2.2 - Xóa Huyện cũ (Bao gồm cả các dấu phẩy thừa đứng kề nó)
-    huyen_cu = best_match['Huyện cũ']
-    huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu) + r'\s*[,]?\s*'
-    out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
-    notes.append(f"Bỏ: {huyen_cu}")
-    
-    # 2.3 - Đổi Xã cũ thành Xã mới
-    xa_cu = best_match['Tên Xã cũ']
-    xa_moi = best_match['Tên Xã mới']
-    out_addr = re.sub(re.escape(xa_cu), xa_moi, out_addr, flags=re.IGNORECASE)
-    notes.append(f"Xã: {xa_cu} ➡️ {xa_moi}")
-    
-    # Dọn dẹp dấu phẩy bị nhân đôi (nếu có)
+        # 2.2 - Nhả ra Xã mới
+        xa_cu_real = best_match['Tên Xã cũ']
+        xa_moi_real = best_match['Tên Xã mới']
+        out_addr = re.sub(re.escape(xa_cu_real), xa_moi_real, out_addr, flags=re.IGNORECASE)
+        notes.append(f"Xã: {xa_cu_real} ➡️ {xa_moi_real}")
+        
+        status = str(best_match['Ghi chú'])
+        if "một phần" in status.lower():
+            notes.append("(⚠️ Sáp nhập 1 phần)")
+            
+    # Dọn dẹp dấu phẩy thừa do việc cắt chữ để lại
     out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
     
-    status = str(best_match['Ghi chú'])
-    if "một phần" in status.lower():
-        notes.append("(⚠️ Sáp nhập 1 phần)")
+    if not notes:
+        return out_addr, "Giữ nguyên"
         
     return out_addr, " | ".join(notes)
 
@@ -109,7 +115,7 @@ def convert_address(query):
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ")
-st.markdown("Hệ thống yêu cầu nhập đầy đủ **Xã/Phường + Quận/Huyện cũ** để đảm bảo chuyển đổi chính xác 100%.")
+st.markdown("Hệ thống yêu cầu nhập đầy đủ **Tỉnh + Huyện + Xã cũ** để đảm bảo độ chính xác tuyệt đối.")
 
 col1, col2 = st.columns(2)
 
