@@ -28,6 +28,7 @@ def load_data():
 df_xa, df_tinh = load_data()
 
 # ==========================================
+# ==========================================
 # 2. HÀM XỬ LÝ LÕI (THAY THẾ CHUẨN XÁC)
 # ==========================================
 def replace_entity(address, df_ref):
@@ -40,14 +41,12 @@ def replace_entity(address, df_ref):
         old_place_lower = old_place.lower()
         
         if old_place_lower in addr_lower:
-            # Ngăn chặn lỗi ghi đè (VD: Phường 2 đè vào Phường 22)
             idx = addr_lower.find(old_place_lower)
             end_idx = idx + len(old_place_lower)
             
             if end_idx < len(addr_lower) and addr_lower[end_idx].isalnum():
                 continue 
             
-            # Thay thế chữ
             pattern = re.compile(re.escape(old_place), re.IGNORECASE)
             new_addr = pattern.sub(str(row['Địa chỉ MỚI']), new_addr)
             
@@ -65,19 +64,19 @@ def convert_address(query):
     current_addr = query
     notes = []
     
-    # Quét lớp 1: Cấp Xã
-    if not df_xa.empty:
-        current_addr, note_xa = replace_entity(current_addr, df_xa)
-        if note_xa:
-            notes.append(note_xa)
-            
-    # Quét lớp 2: Cấp Tỉnh/Huyện
+    # 🔥 BƯỚC 1: DÒ VÀ ĐỔI TỈNH/HUYỆN TRƯỚC
     if not df_tinh.empty:
         current_addr, note_tinh = replace_entity(current_addr, df_tinh)
         if note_tinh:
             notes.append(note_tinh)
             
-    # Tổng hợp ghi chú
+    # 🔥 BƯỚC 2: DÒ VÀ ĐỔI XÃ/PHƯỜNG SAU
+    if not df_xa.empty:
+        current_addr, note_xa = replace_entity(current_addr, df_xa)
+        if note_xa:
+            notes.append(note_xa)
+            
+    # Tổng hợp ghi chú (Hiển thị Tỉnh trước, Xã sau cho thuận mắt)
     if not notes:
         final_note = "Giữ nguyên"
     else:
