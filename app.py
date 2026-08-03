@@ -40,8 +40,12 @@ if 'app_data' not in st.session_state:
     st.session_state.app_data = []
 
 # ==========================================
-# 2. NẠP DỮ LIỆU & BỘ CHUẨN HÓA
+# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ (TỐI ƯU TỐC ĐỘ)
 # ==========================================
+def get_core_name(name):
+    if not name: return ""
+    return re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.?|tx\.?|thị xã)\s+', '', str(name), flags=re.IGNORECASE).strip()
+
 @st.cache_data
 def load_data():
     try:
@@ -60,14 +64,24 @@ def load_data():
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
         
-        df['Length'] = df['Tên Xã cũ'].apply(len)
-        df = df.sort_values(by='Length', ascending=False)
-        return df
+        # Tiền xử lý từ khóa lõi để lọc thô siêu tốc
+        df['xa_core'] = df['Tên Xã cũ'].apply(get_core_name)
+        df['huyen_core'] = df['Huyện cũ'].apply(get_core_name)
+        df['tinh_core'] = df['Tỉnh cũ'].apply(get_core_name)
+        
+        df['xa_core_lower'] = df['xa_core'].str.lower()
+        df['huyen_core_lower'] = df['huyen_core'].str.lower()
+        
+        # Chuyển đổi DataFrame thành List Dictionary để duyệt vòng lặp nhanh gấp 50 lần iterrows
+        records = df.to_dict('records')
+        
+        return df, records
     except Exception as e:
         st.error(f"Lỗi đọc file Excel: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
-df = load_data()
+# Nạp dữ liệu vào RAM
+df, db_records = load_data()
 
 PREFIX_XA_OPT = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)?'
 PREFIX_HUYEN_OPT = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)?'
@@ -76,10 +90,6 @@ PREFIX_TINH_OPT = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)?'
 PREFIX_XA_MAN = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)'
 PREFIX_HUYEN_MAN = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)'
 PREFIX_TINH_MAN = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)'
-
-def get_core_name(name):
-    if not name: return ""
-    return re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.?|tx\.?|thị xã)\s+', '', name, flags=re.IGNORECASE).strip()
 
 def normalize_special_cases(query):
     if not query: return query
@@ -92,7 +102,6 @@ def normalize_special_cases(query):
     query = re.sub(r'(?i)\b(tỉnh\s*)?thừa thiên(\s*[-]?\s*)huế\b', 'Thành phố Huế', query)
     return query
 
-# 🔥 HỆ THỐNG CHẤM ĐIỂM ĐỘ CHÍNH XÁC (MỚI)
 def get_match_score(full_name, core_name, query, prefix_man):
     query = query.lower()
     core_name = core_name.lower()
@@ -143,34 +152,38 @@ def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix
     return query
 
 def auto_convert_address(query):
-    if not query or df.empty: return query, "", True
+    if not query or not db_records: return query, "", True
     
     query_expand = normalize_special_cases(query)
+    query_lower = query_expand.lower()
     out_addr = query_expand
     
     notes = []
     matches = []
     
-    # Quét toàn bộ DB và chấm điểm
-    for _, row in df.iterrows():
+    for row in db_records:
+        # 🔥 TỐI ƯU HÓA: BỘ LỌC THÔ TỐC ĐỘ CAO (Fast-fail)
+        # Chỉ khi chữ lõi tồn tại trong câu, hệ thống mới gọi AI Regex ra chấm điểm
+        if row['xa_core_lower'] not in query_lower or row['huyen_core_lower'] not in query_lower:
+            continue
+            
         xa_cu = str(row['Tên Xã cũ'])
         huyen_cu = str(row['Huyện cũ'])
-        xa_core = get_core_name(xa_cu)
-        huyen_core = get_core_name(huyen_cu)
+        xa_core = row['xa_core']
+        huyen_core = row['huyen_core']
         
         xa_score = get_match_score(xa_cu, xa_core, query_expand, PREFIX_XA_MAN)
         huyen_score = get_match_score(huyen_cu, huyen_core, query_expand, PREFIX_HUYEN_MAN)
         
         if xa_score > 0 and huyen_score > 0:
             tinh_cu = str(row['Tỉnh cũ'])
-            tinh_core = get_core_name(tinh_cu)
+            tinh_core = row['tinh_core']
             tinh_score = get_match_score(tinh_cu, tinh_core, query_expand, PREFIX_TINH_MAN)
             
             total_score = xa_score + huyen_score + (tinh_score if tinh_score > 0 else 0)
             matches.append({'row': row, 'score': total_score})
             
     if matches:
-        # Sắp xếp các kết quả theo Điểm từ Cao xuống Thấp
         matches.sort(key=lambda x: x['score'], reverse=True)
         matched_row = matches[0]['row']
                     
@@ -178,7 +191,7 @@ def auto_convert_address(query):
         huyen_cu_db = str(matched_row['Huyện cũ'])
         xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
         
-        tinh_core, huyen_core, xa_core = get_core_name(tinh_cu_db), get_core_name(huyen_cu_db), get_core_name(xa_cu_db)
+        tinh_core, huyen_core, xa_core = row['tinh_core'], row['huyen_core'], row['xa_core']
         
         if get_match_score(tinh_cu_db, tinh_core, query_expand, PREFIX_TINH_MAN) > 0 and tinh_cu_db.lower() != tinh_moi_db.lower():
             out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
@@ -220,7 +233,6 @@ st.markdown("Hệ thống thông minh tự động gỡ bỏ các tiền tố (P
 
 tab1, tab2, tab3 = st.tabs(["🚀 1. Chuyển đổi hàng loạt", "🛠️ 2. Chuyển đổi đơn lẻ", "📥 3. Trạm xuất dữ liệu"])
 
-# ----------------- TAB 1: CHUYỂN ĐỔI HÀNG LOẠT -----------------
 with tab1:
     col_input, col_info = st.columns([2, 1])
     
@@ -257,7 +269,6 @@ with tab1:
             if err_count > 0:
                 st.error(f"⚠️ Cần sửa tay: **{err_count}** (Xem Tab 2)")
 
-# ----------------- TAB 2: CHUYỂN ĐỔI ĐƠN LẺ -----------------
 with tab2:
     error_items = [d for d in st.session_state.app_data if d['is_error']]
     
@@ -317,7 +328,6 @@ with tab2:
                             d['notes'] = "Giữ nguyên"
                     st.rerun()
 
-# ----------------- TAB 3: TRẠM XUẤT DỮ LIỆU -----------------
 with tab3:
     if not st.session_state.app_data:
         st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab 1 trước nhé!")
