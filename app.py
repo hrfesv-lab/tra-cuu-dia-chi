@@ -127,29 +127,30 @@ def convert_address(query):
     out_addr = query_norm
     notes = []
     
-    # Scoring search
-    candidates = []
+    matches = []
     for _, row in df.iterrows():
-        xa_cu=str(row['Tên Xã cũ']); huyen_cu=str(row['Huyện cũ']); tinh_cu=str(row['Tỉnh cũ'])
-        xa_core=get_core_name(xa_cu); huyen_core=get_core_name(huyen_cu); tinh_core=get_core_name(tinh_cu)
-        xa_match=is_safe_match(xa_cu,xa_core,query_expand,PREFIX_XA_MAN)
-        huyen_match=is_safe_match(huyen_cu,huyen_core,query_expand,PREFIX_HUYEN_MAN)
-        tinh_match=is_safe_match(tinh_cu,tinh_core,query_expand,PREFIX_TINH_MAN)
-        score=0
-        if xa_match: score+=60
-        if huyen_match: score+=30
-        if tinh_match: score+=20
-        if xa_match and huyen_match and tinh_match: score+=20
-        if score>=60:
-            candidates.append((score,row))
-    if not candidates:
-        return out_addr, 'Không có sáp nhập / Giữ nguyên'
-    candidates.sort(key=lambda x:x[0], reverse=True)
-    best_score=candidates[0][0]
-    best_rows=[r for s,r in candidates if s==best_score]
-    matched_row=best_rows[0]
-    ambiguous=len(best_rows)>1
-
+        xa_cu = str(row['Tên Xã cũ'])
+        huyen_cu = str(row['Huyện cũ'])
+        
+        xa_core = get_core_name(xa_cu)
+        huyen_core = get_core_name(huyen_cu)
+        
+        xa_match = is_safe_match(xa_cu, xa_core, query_expand, PREFIX_XA_MAN)
+        huyen_match = is_safe_match(huyen_cu, huyen_core, query_expand, PREFIX_HUYEN_MAN)
+        
+        if xa_match and huyen_match:
+            matches.append(row)
+            
+    if matches:
+        matched_row = matches[0]
+        if len(matches) > 1:
+            for m in matches:
+                tinh_cu = str(m['Tỉnh cũ'])
+                tinh_core = get_core_name(tinh_cu)
+                if is_safe_match(tinh_cu, tinh_core, query_expand, PREFIX_TINH_MAN):
+                    matched_row = m
+                    break
+                    
         tinh_cu_db = str(matched_row['Tỉnh cũ'])
         tinh_moi_db = str(matched_row['Tỉnh mới'])
         huyen_cu_db = str(matched_row['Huyện cũ'])
@@ -179,6 +180,7 @@ def convert_address(query):
             
         if ambiguous:
             notes.append("⚠ Có nhiều kết quả cùng mức phù hợp, nên kiểm tra lại.")
+
         return out_addr, " | ".join(notes)
     else:
         return out_addr, "Không có sáp nhập / Giữ nguyên"
