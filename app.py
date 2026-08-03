@@ -12,7 +12,6 @@ hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            /* Tùy chỉnh màu sắc cho Tabs của Streamlit */
             .stTabs [data-baseweb="tab-list"] {
                 gap: 24px;
             }
@@ -37,12 +36,11 @@ hide_st_style = """
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# KHỞI TẠO BỘ NHỚ TẠM 
 if 'app_data' not in st.session_state:
     st.session_state.app_data = []
 
 # ==========================================
-# 2. NẠP DỮ LIỆU & BỘ XỬ LÝ LÕI
+# 2. NẠP DỮ LIỆU & BỘ CHUẨN HÓA
 # ==========================================
 @st.cache_data
 def load_data():
@@ -82,6 +80,24 @@ PREFIX_TINH_MAN = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)'
 def get_core_name(name):
     if not name: return ""
     return re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.?|tx\.?|thị xã)\s+', '', name, flags=re.IGNORECASE).strip()
+
+# BỘ CHUẨN HÓA VĂN BẢN TRƯỚC KHI XỬ LÝ
+def normalize_special_cases(query):
+    if not query: return query
+    query = unicodedata.normalize('NFC', query)
+    # Gọt số 0 (Phường 09 -> Phường 9)
+    query = re.sub(r'(?i)(^|\s|,)(phường|p\.|p|quận|q\.|q|huyện|h\.|h|xã|x\.|x|thị trấn|tt\.|tt)(\s*)0+(\d+)\b', r'\1\2\3\4', query)
+    
+    # Chuẩn hóa viết tắt 4 thành phố lớn
+    query = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query, flags=re.IGNORECASE)
+    query = re.sub(r'\b(tp\.?\s*hn|tphn|tp\.\s*hà nội)\b', 'Thành phố Hà Nội', query, flags=re.IGNORECASE)
+    query = re.sub(r'\b(tp\.?\s*đn|tp\.\s*đà nẵng)\b', 'Thành phố Đà Nẵng', query, flags=re.IGNORECASE)
+    query = re.sub(r'\b(tp\.?\s*hp|tp\.\s*hải phòng)\b', 'Thành phố Hải Phòng', query, flags=re.IGNORECASE)
+    
+    # 🔥 Ép Thừa Thiên Huế lên Thành phố Huế ngay từ đầu
+    query = re.sub(r'(?i)\b(tỉnh\s*)?thừa thiên(\s*[-]?\s*)huế\b', 'Thành phố Huế', query)
+    
+    return query
 
 def is_safe_match(full_name, core_name, query, prefix_man):
     query = query.lower()
@@ -133,12 +149,11 @@ def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix
 
 def auto_convert_address(query):
     if not query or df.empty: return query, "", True
-    query_norm = unicodedata.normalize('NFC', query)
-    query_norm = re.sub(r'(?i)(^|\s|,)(phường|p\.|p|quận|q\.|q|huyện|h\.|h|xã|x\.|x|thị trấn|tt\.|tt)(\s*)0+(\d+)\b', r'\1\2\3\4', query_norm)
-    query_expand = query_norm
-    query_expand = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query_expand, flags=re.IGNORECASE)
     
-    out_addr = query_norm
+    # Chuẩn hóa văn bản trước khi check
+    query_expand = normalize_special_cases(query)
+    out_addr = query_expand
+    
     notes = []
     matches = []
     
@@ -181,22 +196,19 @@ def auto_convert_address(query):
         return out_addr, "Lỗi/Không tìm thấy vị trí", True
 
 def force_convert_address(query, matched_row):
+    # Dịch "Thừa Thiên Huế" sang "Thành phố Huế" trước
+    out_addr = normalize_special_cases(query)
+    
     tinh_cu_db, tinh_moi_db = str(matched_row['Tỉnh cũ']), str(matched_row['Tỉnh mới'])
     huyen_cu_db = str(matched_row['Huyện cũ'])
     xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
     
     tinh_core, huyen_core, xa_core = get_core_name(tinh_cu_db), get_core_name(huyen_cu_db), get_core_name(xa_cu_db)
     
-    out_addr = query
-    # Vá lỗi đè chữ Tỉnh: Chỉ replace khi người dùng thực sự chọn Tỉnh sai (khác Tỉnh mới)
-    # Ví dụ: Thừa Thiên Huế -> Thừa Thiên Huế (Không replace, tránh đè chữ Huế).
-    if tinh_cu_db.lower() != tinh_moi_db.lower():
-        out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
-        
+    out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
     out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
     out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
     
-    # Cuối cùng dọn dẹp các dấu phẩy thừa
     out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
     return out_addr
 
@@ -232,7 +244,7 @@ with tab1:
                     })
                     progress_bar.progress((i + 1) / len(queries))
                 
-                st.rerun() # Refresh lại để update số lượng lỗi sang Tab 2
+                st.rerun() 
             else:
                 st.warning("Vui lòng nhập dữ liệu!")
 
