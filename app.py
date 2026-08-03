@@ -34,14 +34,12 @@ def load_data():
 df = load_data()
 
 # ==========================================
-# 2. BỘ CÔNG CỤ "NUỐT" TIỀN TỐ AN TOÀN TUYỆT ĐỐI 
+# 2. BỘ CÔNG CỤ XỬ LÝ CHÍNH XÁC (Tránh đè chữ)
 # ==========================================
-# Optional (Có thể có hoặc không)
 PREFIX_XA_OPT = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)?'
 PREFIX_HUYEN_OPT = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)?'
 PREFIX_TINH_OPT = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)?'
 
-# Mandatory (Bắt buộc phải có tiền tố)
 PREFIX_XA_MAN = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)'
 PREFIX_HUYEN_MAN = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)'
 PREFIX_TINH_MAN = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)'
@@ -55,49 +53,59 @@ def is_safe_match(full_name, core_name, query, prefix_man):
     core_name = core_name.lower()
     full_name = full_name.lower()
     
-    # 1. Khớp nguyên tên đầy đủ (VD: "phường 4")
     if re.search(r'(?i)\b' + re.escape(full_name) + r'(?!\w)', query): return True
-        
-    # 2. Khớp theo tiền tố viết tắt (VD: "p. 4")
     if re.search(r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)', query): return True
-        
-    # 3. Khớp độc lập giữa các dấu phẩy (VD: ", 4,")
     if re.search(r'(?i)(?:^|,\s*)' + re.escape(core_name) + r'\s*(?=$|,)', query): return True
-        
-    # 4. Nếu KHÔNG PHẢI SỐ thì cho phép tìm tự do (Bảo vệ các số nhà như 30/4 không bị nhận nhầm)
     if not core_name.isdigit():
         if re.search(r'(?i)\b' + re.escape(core_name) + r'(?!\w)', query): return True
-            
     return False
 
-def remove_part_smart(query, core_name, prefix_opt, prefix_man):
+def remove_part_smart(query, full_name, core_name, prefix_opt, prefix_man):
+    # Ưu tiên tìm tên đầy đủ nguyên bản trước, set count=1 để tránh xóa đè
+    pattern_full = r'(?i)(?:^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
+    out, count = re.subn(pattern_full, '', query, count=1)
+    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
+    
+    pattern_full_loose = r'(?i)\b' + re.escape(full_name) + r'(?!\w)\s*'
+    out, count = re.subn(pattern_full_loose, '', query, count=1)
+    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
+
     pattern_strict = r'(?i)(?:^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_strict, '', query)
+    out, count = re.subn(pattern_strict, '', query, count=1)
     if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
     
     pattern_prefix = r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)\s*'
-    out, count = re.subn(pattern_prefix, '', query)
+    out, count = re.subn(pattern_prefix, '', query, count=1)
     if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
     
     if not core_name.isdigit():
         pattern_loose = r'(?i)\b' + re.escape(core_name) + r'(?!\w)\s*'
-        out = re.sub(pattern_loose, '', query)
+        out = re.sub(pattern_loose, '', query, count=1)
         return re.sub(r',\s*,', ',', out).strip(', ')
         
     return query
 
-def replace_part_smart(query, core_name, new_name, prefix_opt, prefix_man):
+def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix_man):
+    # Ưu tiên đổi đè từ tên đầy đủ trước, set count=1 để tránh đổi đè 2 lần Sóc Trăng
+    pattern_full = r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
+    out, count = re.subn(pattern_full, lambda m: f"{m.group(1)}{new_name}", query, count=1)
+    if count > 0: return out
+    
+    pattern_full_loose = r'(?i)\b' + re.escape(full_name) + r'(?!\w)'
+    out, count = re.subn(pattern_full_loose, new_name, query, count=1)
+    if count > 0: return out
+    
     pattern_strict = r'(?i)(^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_strict, lambda m: f"{m.group(1)}{new_name}", query)
+    out, count = re.subn(pattern_strict, lambda m: f"{m.group(1)}{new_name}", query, count=1)
     if count > 0: return out
     
     pattern_prefix = r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)'
-    out, count = re.subn(pattern_prefix, new_name, query)
+    out, count = re.subn(pattern_prefix, new_name, query, count=1)
     if count > 0: return out
     
     if not core_name.isdigit():
         pattern_loose = r'(?i)\b' + re.escape(core_name) + r'(?!\w)'
-        return re.sub(pattern_loose, new_name, query)
+        return re.sub(pattern_loose, new_name, query, count=1)
         
     return query
 
@@ -153,15 +161,15 @@ def convert_address(query):
         
         # 1. Đổi Tỉnh
         if is_safe_match(tinh_cu_db, tinh_core, query_expand, PREFIX_TINH_MAN) and tinh_cu_db.lower() != tinh_moi_db.lower():
-            out_addr = replace_part_smart(out_addr, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
+            out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
             notes.append(f"Tỉnh: {tinh_cu_db} ➡️ {tinh_moi_db}")
             
         # 2. Bỏ Huyện 
-        out_addr = remove_part_smart(out_addr, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+        out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
         notes.append(f"Bỏ: {huyen_cu_db}")
         
         # 3. Đổi Xã 
-        out_addr = replace_part_smart(out_addr, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
+        out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
         notes.append(f"Xã: {xa_cu_db} ➡️ {xa_moi_db}")
         
         status = str(matched_row['Ghi chú'])
@@ -177,11 +185,11 @@ def convert_address(query):
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 
+# Bỏ ẩn header để hiện lại trạng thái Running...
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            header {visibility: hidden;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
