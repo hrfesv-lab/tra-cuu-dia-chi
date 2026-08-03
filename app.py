@@ -34,7 +34,7 @@ def load_data():
 df = load_data()
 
 # ==========================================
-# 2. BỘ CÔNG CỤ XỬ LÝ CHÍNH XÁC (Tránh đè chữ)
+# 2. BỘ CÔNG CỤ "NUỐT" TIỀN TỐ AN TOÀN TUYỆT ĐỐI 
 # ==========================================
 PREFIX_XA_OPT = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)?'
 PREFIX_HUYEN_OPT = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)?'
@@ -61,7 +61,6 @@ def is_safe_match(full_name, core_name, query, prefix_man):
     return False
 
 def remove_part_smart(query, full_name, core_name, prefix_opt, prefix_man):
-    # Ưu tiên tìm tên đầy đủ nguyên bản trước, set count=1 để tránh xóa đè
     pattern_full = r'(?i)(?:^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
     out, count = re.subn(pattern_full, '', query, count=1)
     if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
@@ -86,7 +85,6 @@ def remove_part_smart(query, full_name, core_name, prefix_opt, prefix_man):
     return query
 
 def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix_man):
-    # Ưu tiên đổi đè từ tên đầy đủ trước, set count=1 để tránh đổi đè 2 lần Sóc Trăng
     pattern_full = r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
     out, count = re.subn(pattern_full, lambda m: f"{m.group(1)}{new_name}", query, count=1)
     if count > 0: return out
@@ -116,6 +114,10 @@ def convert_address(query):
     if not query or df.empty: return query, ""
     
     query_norm = unicodedata.normalize('NFC', query)
+    
+    # 🔥 BẢN VÁ LỖI: Tự động gọt số 0 vô nghĩa (VD: Phường 09 -> Phường 9)
+    query_norm = re.sub(r'(?i)(^|\s|,)(phường|p\.|p|quận|q\.|q|huyện|h\.|h|xã|x\.|x|thị trấn|tt\.|tt)(\s*)0+(\d+)\b', r'\1\2\3\4', query_norm)
+    
     query_expand = query_norm
     query_expand = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query_expand, flags=re.IGNORECASE)
     query_expand = re.sub(r'\b(tp\.?\s*hn|tphn|tp\.\s*hà nội)\b', 'Thành phố Hà Nội', query_expand, flags=re.IGNORECASE)
@@ -185,7 +187,6 @@ def convert_address(query):
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 
-# Bỏ ẩn header để hiện lại trạng thái Running...
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -203,7 +204,7 @@ with col1:
     input_text = st.text_area(
         "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
         height=300, 
-        placeholder="Ví dụ:\n156, Đường 30/4, phường 2, Thành phố Sóc Trăng, Tỉnh Sóc Trăng"
+        placeholder="Ví dụ:\n330 Lý Thường Kiệt, Phường 09, Quận Tân Bình, Thành phố Hồ Chí Minh"
     )
     search_button = st.button("🔄 Chuyển đổi ngay", type="primary", use_container_width=True)
 
