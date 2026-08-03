@@ -35,16 +35,19 @@ def load_data():
 
 df = load_data()
 
+# Hàm tách bỏ các tiền tố (Quận, Huyện, Xã...) để tìm "từ lõi"
+def get_core_name(name):
+    if not name: return ""
+    return re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.?|tx\.?|thị xã)\s+', '', name, flags=re.IGNORECASE).strip()
+
 # ==========================================
 # 2. THUẬT TOÁN ĐỊNH VỊ THÔNG MINH
 # ==========================================
 def convert_address(query):
     if not query or df.empty: return query, ""
     
-    # Ép chuẩn Unicode
     query_norm = unicodedata.normalize('NFC', query)
     
-    # Bảng quy đổi tên tắt Tỉnh/Thành phố thông dụng
     query_expand = query_norm
     query_expand = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query_expand, flags=re.IGNORECASE)
     query_expand = re.sub(r'\b(tp\.?\s*hn|tphn|tp\.\s*hà nội)\b', 'Thành phố Hà Nội', query_expand, flags=re.IGNORECASE)
@@ -64,47 +67,51 @@ def convert_address(query):
             return False
         return True
 
-    matched_row = None
-    
-    # BƯỚC 1: DÒ VỚI ĐIỀU KIỆN CHÍNH (Khớp Xã cũ + Quận/Huyện cũ)
     matches = []
     for _, row in df.iterrows():
         xa_cu = str(row['Tên Xã cũ'])
         huyen_cu = str(row['Huyện cũ'])
         
-        if is_in_text(xa_cu, query_lower) and is_in_text(huyen_cu, query_lower):
+        # Bắt thông minh: Chấp nhận cả việc người dùng gõ thiếu chữ "Quận", "Huyện", "Xã"
+        xa_match = is_in_text(xa_cu, query_lower) or is_in_text(get_core_name(xa_cu), query_lower)
+        huyen_match = is_in_text(huyen_cu, query_lower) or is_in_text(get_core_name(huyen_cu), query_lower)
+        
+        if xa_match and huyen_match:
             matches.append(row)
             
     if matches:
         matched_row = matches[0]
-        # Nếu trùng nhiều dòng (rất hiếm), ưu tiên dòng khớp thêm Tỉnh cũ
         if len(matches) > 1:
             for m in matches:
-                if is_in_text(str(m['Tỉnh cũ']), query_lower):
+                tinh_cu = str(m['Tỉnh cũ'])
+                if is_in_text(tinh_cu, query_lower) or is_in_text(get_core_name(tinh_cu), query_lower):
                     matched_row = m
                     break
                     
-    # BƯỚC 2: CHUYỂN ĐỔI SANG ĐỊA CHỈ MỚI
-    if matched_row is not None:
-        tinh_cu_real = str(matched_row['Tỉnh cũ'])
-        tinh_moi_real = str(matched_row['Tỉnh mới'])
-        huyen_cu_real = str(matched_row['Huyện cũ'])
-        xa_cu_real = str(matched_row['Tên Xã cũ'])
-        xa_moi_real = str(matched_row['Tên Xã mới'])
+        tinh_cu_db = str(matched_row['Tỉnh cũ'])
+        tinh_moi_db = str(matched_row['Tỉnh mới'])
+        huyen_cu_db = str(matched_row['Huyện cũ'])
+        xa_cu_db = str(matched_row['Tên Xã cũ'])
+        xa_moi_db = str(matched_row['Tên Xã mới'])
         
-        # 1. Đổi Tỉnh cũ -> Tỉnh mới (Nếu có nhập tỉnh cũ trong câu)
-        if is_in_text(tinh_cu_real, query_lower) and tinh_cu_real.lower() != tinh_moi_real.lower():
-            out_addr = re.sub(re.escape(tinh_cu_real), tinh_moi_real, out_addr, flags=re.IGNORECASE)
-            notes.append(f"Tỉnh: {tinh_cu_real} ➡️ {tinh_moi_real}")
+        # Xác định chính xác người dùng đã gõ chuỗi gốc hay chuỗi lõi để xóa/đổi cho đúng
+        actual_tinh = tinh_cu_db if is_in_text(tinh_cu_db, query_lower) else (get_core_name(tinh_cu_db) if is_in_text(get_core_name(tinh_cu_db), query_lower) else None)
+        actual_huyen = huyen_cu_db if is_in_text(huyen_cu_db, query_lower) else get_core_name(huyen_cu_db)
+        actual_xa = xa_cu_db if is_in_text(xa_cu_db, query_lower) else get_core_name(xa_cu_db)
+        
+        # 1. Đổi Tỉnh
+        if actual_tinh and tinh_cu_db.lower() != tinh_moi_db.lower():
+            out_addr = re.sub(re.escape(actual_tinh), tinh_moi_db, out_addr, flags=re.IGNORECASE)
+            notes.append(f"Tỉnh: {tinh_cu_db} ➡️ {tinh_moi_db}")
             
-        # 2. Xóa Quận/Huyện cũ khỏi địa chỉ
-        huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu_real) + r'\s*[,]?\s*'
+        # 2. Bỏ Huyện
+        huyen_pattern = r'[,]?\s*' + re.escape(actual_huyen) + r'\s*[,]?\s*'
         out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
-        notes.append(f"Bỏ: {huyen_cu_real}")
+        notes.append(f"Bỏ: {huyen_cu_db}")
         
-        # 3. Thay Xã cũ -> Xã mới
-        out_addr = re.sub(re.escape(xa_cu_real), xa_moi_real, out_addr, flags=re.IGNORECASE)
-        notes.append(f"Xã: {xa_cu_real} ➡️ {xa_moi_real}")
+        # 3. Đổi Xã
+        out_addr = re.sub(re.escape(actual_xa), xa_moi_db, out_addr, flags=re.IGNORECASE)
+        notes.append(f"Xã: {xa_cu_db} ➡️ {xa_moi_db}")
         
         out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
         
@@ -121,7 +128,7 @@ def convert_address(query):
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ")
-st.markdown("Hệ thống tự động nhận diện thông minh, hỗ trợ cả từ viết tắt (TP.HCM, HN, ĐN...).")
+st.markdown("Hệ thống tự động nhận diện thông minh: Hỗ trợ viết tắt Tỉnh/Thành, hỗ trợ gõ tắt (lược bỏ chữ Quận, Huyện, Phường, Xã).")
 
 col1, col2 = st.columns(2)
 
@@ -129,7 +136,7 @@ with col1:
     input_text = st.text_area(
         "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
         height=300, 
-        placeholder="Ví dụ:\n113/47/1A Võ Duy Ninh, Phường 22, Quận Bình Thạnh, TP.HCM"
+        placeholder="Ví dụ:\n113/47/1A Võ Duy Ninh, Phường 22, Bình Thạnh, TP.HCM"
     )
     search_button = st.button("🔄 Chuyển đổi ngay", type="primary", use_container_width=True)
 
