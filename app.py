@@ -40,7 +40,7 @@ if 'app_data' not in st.session_state:
     st.session_state.app_data = []
 
 # ==========================================
-# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ (TỐI ƯU TỐC ĐỘ)
+# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ
 # ==========================================
 def get_core_name(name):
     if not name: return ""
@@ -59,16 +59,9 @@ def load_data():
             
         df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
         
-        # Đọc Huyện cũ
         huyen_col = 'Quận/huyện cũ' if 'Quận/huyện cũ' in df.columns else 'Quận/huyện'
         df['Huyện cũ'] = df[huyen_col].apply(clean_code)
         
-        # Đọc Huyện mới (Nếu trống thì tự hiểu là Huyện không đổi)
-        if 'Quận/huyện mới' in df.columns:
-            df['Huyện mới'] = df['Quận/huyện mới'].apply(lambda x: clean_code(x) if pd.notna(x) else "")
-        else:
-            df['Huyện mới'] = df['Huyện cũ']
-            
         df['Tỉnh cũ'] = df['Tỉnh cũ'].apply(clean_code)
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
@@ -96,15 +89,20 @@ PREFIX_XA_MAN = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)'
 PREFIX_HUYEN_MAN = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)'
 PREFIX_TINH_MAN = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)'
 
-def normalize_special_cases(query):
+def normalize_formatting(query):
+    # Chỉ dọn dẹp số 0 vô nghĩa và xử lý đặc biệt Thừa Thiên Huế
     if not query: return query
     query = unicodedata.normalize('NFC', query)
     query = re.sub(r'(?i)(^|\s|,)(phường|p\.|p|quận|q\.|q|huyện|h\.|h|xã|x\.|x|thị trấn|tt\.|tt)(\s*)0+(\d+)\b', r'\1\2\3\4', query)
+    query = re.sub(r'(?i)\b(tỉnh\s*)?thừa thiên(\s*[-]?\s*)huế\b', 'Thành phố Huế', query)
+    return query
+
+def normalize_for_search(query):
+    # Dịch ngầm để AI chấm điểm đúng, KHÔNG làm thay đổi câu văn gốc
     query = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query, flags=re.IGNORECASE)
     query = re.sub(r'\b(tp\.?\s*hn|tphn|tp\.\s*hà nội)\b', 'Thành phố Hà Nội', query, flags=re.IGNORECASE)
     query = re.sub(r'\b(tp\.?\s*đn|tp\.\s*đà nẵng)\b', 'Thành phố Đà Nẵng', query, flags=re.IGNORECASE)
     query = re.sub(r'\b(tp\.?\s*hp|tp\.\s*hải phòng)\b', 'Thành phố Hải Phòng', query, flags=re.IGNORECASE)
-    query = re.sub(r'(?i)\b(tỉnh\s*)?thừa thiên(\s*[-]?\s*)huế\b', 'Thành phố Huế', query)
     return query
 
 def get_match_score(full_name, core_name, query, prefix_man):
@@ -159,9 +157,9 @@ def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix
 def auto_convert_address(query):
     if not query or not db_records: return query, "", True
     
-    query_expand = normalize_special_cases(query)
-    query_lower = query_expand.lower()
-    out_addr = query_expand
+    out_addr = normalize_formatting(query)
+    query_search = normalize_for_search(out_addr)
+    query_lower = query_search.lower()
     
     notes = []
     matches = []
@@ -175,13 +173,13 @@ def auto_convert_address(query):
         xa_core = row['xa_core']
         huyen_core = row['huyen_core']
         
-        xa_score = get_match_score(xa_cu, xa_core, query_expand, PREFIX_XA_MAN)
-        huyen_score = get_match_score(huyen_cu, huyen_core, query_expand, PREFIX_HUYEN_MAN)
+        xa_score = get_match_score(xa_cu, xa_core, query_search, PREFIX_XA_MAN)
+        huyen_score = get_match_score(huyen_cu, huyen_core, query_search, PREFIX_HUYEN_MAN)
         
         if xa_score > 0 and huyen_score > 0:
             tinh_cu = str(row['Tỉnh cũ'])
             tinh_core = row['tinh_core']
-            tinh_score = get_match_score(tinh_cu, tinh_core, query_expand, PREFIX_TINH_MAN)
+            tinh_score = get_match_score(tinh_cu, tinh_core, query_search, PREFIX_TINH_MAN)
             
             total_score = xa_score + huyen_score + (tinh_score if tinh_score > 0 else 0)
             matches.append({'row': row, 'score': total_score})
@@ -192,48 +190,33 @@ def auto_convert_address(query):
                     
         tinh_cu_db, tinh_moi_db = str(matched_row['Tỉnh cũ']), str(matched_row['Tỉnh mới'])
         huyen_cu_db = str(matched_row['Huyện cũ'])
-        huyen_moi_db = str(matched_row['Huyện mới'])
         xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
         
         tinh_core, huyen_core, xa_core = matched_row['tinh_core'], matched_row['huyen_core'], matched_row['xa_core']
         
-        # 1. Tỉnh
-        if get_match_score(tinh_cu_db, tinh_core, query_expand, PREFIX_TINH_MAN) > 0 and tinh_cu_db.lower() != tinh_moi_db.lower():
+        # 1. Tỉnh (Chỉ đổi nếu thực sự thay đổi tên Tỉnh)
+        if get_match_score(tinh_cu_db, tinh_core, query_search, PREFIX_TINH_MAN) > 0 and tinh_cu_db.lower() != tinh_moi_db.lower():
             out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
             notes.append(f"Tỉnh ➡️ {tinh_moi_db}")
-        else:
-            out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
             
-        # 2. Huyện (Khắc phục triệt để lỗi "Bỏ Huyện" vô lý)
-        if huyen_moi_db == "":
-            out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-            notes.append(f"Bỏ Huyện")
-        elif huyen_cu_db.lower() != huyen_moi_db.lower():
-            out_addr = replace_part_smart(out_addr, huyen_cu_db, huyen_core, huyen_moi_db, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-            notes.append(f"Huyện ➡️ {huyen_moi_db}")
-        else:
-            # Nếu Huyện không đổi, chỉ chuẩn hóa tên chứ không bỏ
-            out_addr = replace_part_smart(out_addr, huyen_cu_db, huyen_core, huyen_moi_db, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+        # 2. Xóa Huyện cũ (Logic nguyên thủy: Bỏ đi không cần giữ)
+        out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+        notes.append(f"Bỏ Huyện")
             
-        # 3. Xã
+        # 3. Đổi Xã
         if xa_cu_db.lower() != xa_moi_db.lower():
             out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
             notes.append(f"Xã ➡️ {xa_moi_db}")
-        else:
-            out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
-            
-        # Dọn dấu phẩy thừa
-        out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
+        
         return out_addr, " | ".join(notes) if notes else "Chuẩn hóa", False
     else:
         return out_addr, "Lỗi/Không tìm thấy vị trí", True
 
 def force_convert_address(query, matched_row):
-    out_addr = normalize_special_cases(query)
+    out_addr = normalize_formatting(query)
     
     tinh_cu_db, tinh_moi_db = str(matched_row['Tỉnh cũ']), str(matched_row['Tỉnh mới'])
     huyen_cu_db = str(matched_row['Huyện cũ'])
-    huyen_moi_db = str(matched_row['Huyện mới'])
     xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
     
     tinh_core, huyen_core, xa_core = matched_row['tinh_core'], matched_row['huyen_core'], matched_row['xa_core']
@@ -241,12 +224,10 @@ def force_convert_address(query, matched_row):
     if tinh_cu_db.lower() != tinh_moi_db.lower():
         out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
         
-    if huyen_moi_db == "":
-        out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-    else:
-        out_addr = replace_part_smart(out_addr, huyen_cu_db, huyen_core, huyen_moi_db, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+    out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
         
-    out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
+    if xa_cu_db.lower() != xa_moi_db.lower():
+        out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
     
     out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
     return out_addr
@@ -266,7 +247,7 @@ with tab1:
         input_text = st.text_area(
             "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
             height=250,
-            placeholder="Ví dụ:\n36/8 Đường Số 11, Phường 11, Gò Vấp, TP. Hồ Chí Minh"
+            placeholder="Ví dụ:\n36/8 đường số 11, phường 11, gò vấp, TP.HCM"
         )
         if st.button("🔄 Bắt đầu chạy tự động", type="primary", use_container_width=True):
             if input_text.strip():
