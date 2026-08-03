@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import unicodedata
 
 # ==========================================
 # 1. NẠP VÀ LÀM SẠCH DATABASE CHUẨN
@@ -13,7 +14,9 @@ def load_data():
         
         def clean_code(text):
             if pd.isna(text): return ""
-            return re.sub(r'\s*\(\d+\)', '', str(text)).strip()
+            # 🔥 ĐÂY LÀ CHÌA KHÓA: Ép chuẩn Unicode tiếng Việt để chống lỗi bộ gõ
+            text = unicodedata.normalize('NFC', str(text))
+            return re.sub(r'\s*\(\d+\)', '', text).strip()
             
         df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
         
@@ -24,7 +27,6 @@ def load_data():
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
         
-        # Sắp xếp độ dài Xã cũ giảm dần (ưu tiên các tên dài)
         df['Length'] = df['Tên Xã cũ'].apply(len)
         df = df.sort_values(by='Length', ascending=False)
         return df
@@ -35,16 +37,17 @@ def load_data():
 df = load_data()
 
 # ==========================================
-# 2. THUẬT TOÁN DÒ THEO CỘT EXCEL (ROW-BASED MAPPING)
+# 2. THUẬT TOÁN DÒ THEO CỘT EXCEL
 # ==========================================
 def convert_address(query):
     if not query or df.empty: return query, ""
     
-    query_lower = query.lower()
-    out_addr = query
+    # 🔥 Ép chuẩn luôn cả câu người dùng nhập vào
+    query_norm = unicodedata.normalize('NFC', query)
+    query_lower = query_norm.lower()
+    out_addr = query_norm
     notes = []
     
-    # Hàm kiểm tra từ khóa an toàn (không bị đè chữ)
     def is_in_text(word, text):
         if not word: return False
         idx = text.find(word.lower())
@@ -56,7 +59,7 @@ def convert_address(query):
 
     matched_row = None
     
-    # BƯỚC 1: DÒ CỘT CŨ (Tìm dòng chứa đủ Tỉnh + Huyện + Xã)
+    # BƯỚC 1: DÒ CỘT CŨ (Tỉnh + Huyện + Xã)
     for _, row in df.iterrows():
         xa_cu = str(row['Tên Xã cũ'])
         huyen_cu = str(row['Huyện cũ'])
@@ -66,9 +69,9 @@ def convert_address(query):
            is_in_text(huyen_cu, query_lower) and \
            is_in_text(xa_cu, query_lower):
             matched_row = row
-            break  # Chốt luôn dòng này, không dò thêm nữa!
+            break
             
-    # BƯỚC 2: NHÌN SANG CỘT MỚI ĐỂ CHUYỂN ĐỔI
+    # BƯỚC 2: CHUYỂN ĐỔI SANG MỚI
     if matched_row is not None:
         tinh_cu_real = str(matched_row['Tỉnh cũ'])
         tinh_moi_real = str(matched_row['Tỉnh mới'])
@@ -76,21 +79,17 @@ def convert_address(query):
         xa_cu_real = str(matched_row['Tên Xã cũ'])
         xa_moi_real = str(matched_row['Tên Xã mới'])
         
-        # 1. Đổi Tỉnh cũ -> Tỉnh mới (nếu có khác biệt)
         if tinh_cu_real.lower() != tinh_moi_real.lower():
             out_addr = re.sub(re.escape(tinh_cu_real), tinh_moi_real, out_addr, flags=re.IGNORECASE)
             notes.append(f"Tỉnh: {tinh_cu_real} ➡️ {tinh_moi_real}")
             
-        # 2. Cắt bỏ Quận/Huyện cũ ra khỏi câu
         huyen_pattern = r'[,]?\s*' + re.escape(huyen_cu_real) + r'\s*[,]?\s*'
         out_addr = re.sub(huyen_pattern, ', ', out_addr, flags=re.IGNORECASE)
         notes.append(f"Bỏ: {huyen_cu_real}")
         
-        # 3. Đổi Xã cũ -> Xã mới
         out_addr = re.sub(re.escape(xa_cu_real), xa_moi_real, out_addr, flags=re.IGNORECASE)
         notes.append(f"Xã: {xa_cu_real} ➡️ {xa_moi_real}")
         
-        # Dọn dẹp sạch sẽ các dấu phẩy thừa
         out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
         
         status = str(matched_row['Ghi chú'])
@@ -99,7 +98,7 @@ def convert_address(query):
             
         return out_addr, " | ".join(notes)
     else:
-        return out_addr, "Giữ nguyên (Không tìm thấy dòng khớp đủ Tỉnh+Huyện+Xã cũ)"
+        return out_addr, "Giữ nguyên"
 
 # ==========================================
 # 3. GIAO DIỆN WEB
@@ -114,7 +113,7 @@ with col1:
     input_text = st.text_area(
         "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
         height=300, 
-        placeholder="Ví dụ:\n113 Võ Duy Ninh, Phường 22, Quận Bình Thạnh, Thành phố Hồ Chí Minh"
+        placeholder="Ví dụ:\nTổ 4 Vĩnh Điềm Trung, Xã Vĩnh Hiệp, Thành phố Nha Trang, Tỉnh Khánh Hòa"
     )
     search_button = st.button("🔄 Chuyển đổi ngay", type="primary", use_container_width=True)
 
