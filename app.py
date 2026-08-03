@@ -33,7 +33,10 @@ def load_data():
 
 df = load_data()
 
-# Các Regex quét tiền tố viết tắt
+# ==========================================
+# 2. BỘ CÔNG CỤ "NUỐT" TIỀN TỐ NÂNG CAO (CHO TOÀN QUỐC)
+# ==========================================
+# Regex nhận diện mọi kiểu gõ viết tắt của Phường/Xã/Quận/Huyện/Thành phố
 PREFIX_XA = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)?'
 PREFIX_HUYEN = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)?'
 PREFIX_TINH = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)?'
@@ -43,6 +46,7 @@ def get_core_name(name):
     return re.sub(r'^(xã|phường|thị trấn|quận|huyện|thành phố|tỉnh|tp\.?|tx\.?|thị xã)\s+', '', name, flags=re.IGNORECASE).strip()
 
 def remove_huyen_smart(query, huyen_core):
+    # Tìm chính xác cụm Quận/Huyện (bao gồm cả TP. Thủ Đức, TP. Biên Hòa...) và xóa sạch cả chữ TP. lẫn dấu phẩy kề nó
     pattern_strict = r'(?i)(?:^|,\s*)' + PREFIX_HUYEN + re.escape(huyen_core) + r'\s*(?=$|,)'
     out, count = re.subn(pattern_strict, '', query)
     if count == 0:
@@ -67,7 +71,7 @@ def replace_tinh_smart(query, tinh_core, tinh_moi):
     return out
 
 # ==========================================
-# 2. THUẬT TOÁN ĐỊNH VỊ THÔNG MINH
+# 3. THUẬT TOÁN ĐỊNH VỊ THÔNG MINH
 # ==========================================
 def convert_address(query):
     if not query or df.empty: return query, ""
@@ -127,11 +131,11 @@ def convert_address(query):
             out_addr = replace_tinh_smart(out_addr, actual_tinh, tinh_moi_db)
             notes.append(f"Tỉnh: {tinh_cu_db} ➡️ {tinh_moi_db}")
             
-        # 2. Bỏ Huyện
+        # 2. Bỏ Huyện (Tự động nuốt sạch chữ TP. nếu là Thủ Đức, Biên Hòa...)
         out_addr = remove_huyen_smart(out_addr, actual_huyen)
         notes.append(f"Bỏ: {huyen_cu_db}")
         
-        # 3. Đổi Xã
+        # 3. Đổi Xã (Tự động nuốt chữ P. / Phường)
         out_addr = replace_xa_smart(out_addr, actual_xa, xa_moi_db)
         notes.append(f"Xã: {xa_cu_db} ➡️ {xa_moi_db}")
         
@@ -144,7 +148,7 @@ def convert_address(query):
         return out_addr, "Giữ nguyên"
 
 # ==========================================
-# 3. GIAO DIỆN WEB
+# 4. GIAO DIỆN WEB
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 
