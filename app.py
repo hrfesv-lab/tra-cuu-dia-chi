@@ -178,9 +178,6 @@ def convert_address(query):
         if "một phần" in status.lower():
             notes.append("(⚠️ Sáp nhập 1 phần)")
             
-        if ambiguous:
-            notes.append("⚠ Có nhiều kết quả cùng mức phù hợp, nên kiểm tra lại.")
-
         return out_addr, " | ".join(notes)
     else:
         return out_addr, "Không có sáp nhập / Giữ nguyên"
