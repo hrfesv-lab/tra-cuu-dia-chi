@@ -29,7 +29,7 @@ if 'app_data_ai' not in st.session_state: st.session_state.app_data_ai = []
 if 'ai_cache' not in st.session_state: st.session_state.ai_cache = {}
 
 # ==========================================
-# 2. HÀM XỬ LÝ EXCEL (CŨ -> MỚI)
+# 2. HÀM XỬ LÝ EXCEL & DỮ LIỆU CHUẨN
 # ==========================================
 def get_core_name(name):
     if not name: return ""
@@ -171,8 +171,7 @@ def force_convert_address(query, row):
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
 # ==========================================
-# ==========================================
-# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - SIẾT NGUYÊN TẮC CHẮC CHẮN 100%
+# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - TRẢ VỀ ĐỊA CHỈ + MỨC ĐỘ TIN CẬY
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
@@ -187,19 +186,21 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     if not uncached_addresses: return all_results
     
     batches = [uncached_addresses[i:i + batch_size] for i in range(0, len(uncached_addresses), batch_size)]
-    progress_bar = st.progress(0, text="Đang kiểm tra độ chính xác dữ liệu...")
+    progress_bar = st.progress(0, text="Đang phân tích và đánh giá độ tin cậy...")
     
     for idx, batch in enumerate(batches):
         prompt = f"""
-        Bạn là hệ thống kiểm tra địa giới hành chính Việt Nam. Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (trước sáp nhập 2025).
+        Bạn là chuyên gia địa giới hành chính Việt Nam. Tra ngược danh sách địa chỉ MỚI sau đây về địa chỉ CŨ (trước sáp nhập 2025).
         Danh sách:
         {json.dumps(batch, ensure_ascii=False)}
         
-        QUY TẮC AN TOÀN DỮ LIỆU BẮT BUỘC (Đọc kỹ):
-        1. CHỈ TRẢ VỀ KẾT QUẢ KHI BẠN CHẮC CHẮN 100% VỀ MỐI TƯƠNG QUAN LỊCH SỬ SÁP NHẬP/ĐỊA GIỚI.
-        2. TUYỆT ĐỐI KHÔNG ĐOÁN BỪA: Nếu địa chỉ bị sai quá nặng, mâu thuẫn lớn giữa Tỉnh và Phường/Đường, hoặc thiếu dữ liệu không thể suy luận chính xác, BẮT BUỘC phải trả về value là: "LỖI: Cần kiểm tra thủ công".
-        3. Format trả về: Chuỗi JSON hợp lệ. Key là địa chỉ gốc, value là Địa chỉ chuẩn HOẶC chữ "LỖI: Cần kiểm tra thủ công".
-        4. Chuỗi địa chỉ chuẩn format: "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố cũ]". Không giải thích lề mề.
+        Yêu cầu BẮT BUỘC:
+        1. Trả về kết quả dưới dạng JSON hợp lệ. Key là địa chỉ gốc, Value là một Object chứa 2 trường: "address" và "confidence".
+        2. Trường "confidence" ghi nhận mức độ tin cậy:
+           - "Cao": Nếu biết rõ lịch sử sáp nhập/địa giới chính xác.
+           - "Trung bình": Nếu giữ nguyên địa chỉ hoặc sửa lỗi chính tả nhẹ.
+           - "Nghi ngờ": Nếu địa chỉ bị mâu thuẫn lớn (VD: tên phường ở tỉnh này nhưng đuôi lại ghi tỉnh khác), thiếu thông tin nghiêm trọng, hoặc bạn không chắc chắn.
+        3. Trường "address": Chuỗi địa chỉ dự đoán theo format "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố cũ]".
         """
         
         max_retries, delay = 3, 2
@@ -212,14 +213,19 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
                     
                 parsed_data = json.loads(text_res)
                 for k, v in parsed_data.items():
-                    clean_val = str(v).split("|")[0].strip()
-                    st.session_state.ai_cache[k] = clean_val
-                    all_results[k] = clean_val
+                    if isinstance(v, dict):
+                        res_obj = {"address": v.get("address", ""), "confidence": v.get("confidence", "Nghi ngờ")}
+                    else:
+                        res_obj = {"address": str(v), "confidence": "Nghi ngờ"}
+                    
+                    st.session_state.ai_cache[k] = res_obj
+                    all_results[k] = res_obj
                 break
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1: time.sleep(delay); delay *= 2
                 else:
-                    for addr in batch: all_results[addr] = f"LỖI: Quá tải hệ thống API."
+                    for addr in batch: 
+                        all_results[addr] = {"address": addr, "confidence": "Nghi ngờ"}
                     
         time.sleep(1)
         progress_bar.progress((idx + 1) / len(batches), text=f"Đang xử lý gói {idx + 1}/{len(batches)}...")
@@ -354,60 +360,65 @@ else:
         if st.button("⏪ Yêu cầu AI dịch ngược", type="primary", key="btn_ai"):
             if not selected_model: st.warning("⚠️ Vui lòng nhập API Key hợp lệ ở bảng cấu hình phía trên trước!")
             elif input_text_ai.strip():
-                # XÓA BỘ NHỚ CACHE CỦA AI ĐỂ LÀM SẠCH DỮ LIỆU CỦ
                 st.session_state.ai_cache = {}
-                
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 model = genai.GenerativeModel(selected_model)
                 results = process_batch_with_intelligence(model, queries)
                 
                 st.session_state.app_data_ai = []
                 for i, q in enumerate(queries):
-                    res = results.get(q, "LỖI: Không nhận được phản hồi")
-                    is_err = "LỖI:" in res.upper()
+                    res_obj = results.get(q, {"address": q, "confidence": "Nghi ngờ"})
+                    conf = res_obj.get("confidence", "Nghi ngờ")
+                    is_err = conf == "Nghi ngờ"
                     
                     st.session_state.app_data_ai.append({
                         'id': i, 
                         'old': q, 
-                        'new': res if not is_err else "", 
-                        'notes': "Xử lý thành công" if not is_err else res, 
+                        'new': res_obj.get("address", ""), 
+                        'confidence': conf,
                         'is_error': is_err
                     })
                 st.rerun()
 
         if st.session_state.app_data_ai:
-            errs = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
-            st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {errs} ca thiếu dữ liệu ➡️ Chọn tab 'Trạm cấp cứu AI' phía trên)")
+            suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
+            st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
+    # TRẠM CẤP CỨU AI: CẤU TRÚC ĐỒNG BỘ CHUẨN ĐÚNG NHƯ PHÂN HỆ EXCEL
     elif sub_mode_ai == "Trạm cấp cứu AI":
-        error_items_ai = [d for d in st.session_state.app_data_ai if d['is_error']]
-        if not error_items_ai: st.info("🎉 Tất cả địa chỉ đã được AI dịch ngược thành công!")
+        suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
+        if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
         else:
-            st.warning("Các địa chỉ dưới đây bị thiếu dữ liệu (như tên đường/phường), vui lòng bổ sung thêm manh mối!")
-            err_dict_ai = {i['id']: i['old'] for i in error_items_ai}
-            sel_id_ai = st.selectbox("Chọn địa chỉ cần bổ sung:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
+            st.warning("Các địa chỉ dưới đây AI đánh giá mức độ tin cậy 'Nghi ngờ'. Bạn có thể kiểm tra và chọn ĐVHC chuẩn bên dưới để mã hóa lại!")
+            err_dict_ai = {i['id']: f"{i['old']} ➡️ [Dự đoán AI: {i['new']}]" for i in suspect_items}
+            sel_id_ai = st.selectbox("Chọn địa chỉ cần cấp cứu/xác nhận:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
             sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
             
-            st.write(f"**Lý do AI chưa dịch được:** {sel_item_ai['notes']}")
-            new_context = st.text_input("Bổ sung thông tin (Thêm tên đường, địa danh gần đó...):", value=sel_item_ai['old'], key="fix_ai_input")
+            c1, c2, c3 = st.columns(3)
+            tinh_list_ai = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
+            tinh_sel_ai = c1.selectbox("Tỉnh/Thành chuẩn", ["-- Chọn --"] + tinh_list_ai, key="tinh_sel_ai")
+            huyen_sel_ai, xa_sel_ai = "-- Chọn --", "-- Chọn --"
+            if tinh_sel_ai != "-- Chọn --":
+                huyen_sel_ai = c2.selectbox("Quận/Huyện chuẩn", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel_ai]['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel_ai")
+                if huyen_sel_ai != "-- Chọn --":
+                    xa_sel_ai = c3.selectbox("Phường/Xã chuẩn", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel_ai) & (df['Huyện cũ'] == huyen_sel_ai)]['Tên Xã cũ'].dropna().unique().tolist()), key="xa_sel_ai")
             
-            if st.button("🔄 Cho AI chạy lại ca này", type="primary", key="retry_ai") and selected_model:
-                with st.spinner("AI đang thử lại..."):
-                    model = genai.GenerativeModel(selected_model)
-                    res = process_batch_with_intelligence(model, [new_context])[new_context]
-                    is_err = "LỖI:" in res.upper()
-                    if not is_err:
-                        clean_res = res.split("|")[0].strip()
-                        for d in st.session_state.app_data_ai:
-                            if d['id'] == sel_id_ai:
-                                d.update({'old': new_context, 'new': clean_res, 'notes': "✅ Cấp cứu thành công", 'is_error': False})
-                        st.rerun()
-                    else: st.error("Vẫn chưa đủ dữ liệu, AI chưa thể tra được!")
+            if xa_sel_ai != "-- Chọn --":
+                exact_row_ai = df[(df['Tỉnh cũ'] == tinh_sel_ai) & (df['Huyện cũ'] == huyen_sel_ai) & (df['Tên Xã cũ'] == xa_sel_ai)].iloc[0]
+                sug_addr_ai = force_convert_address(sel_item_ai['old'], exact_row_ai)
+                final_edit_ai = st.text_input("✍️ Kết quả sau khi ghép nối chuẩn:", value=sug_addr_ai, key="edit_ai_input")
+                if st.button("💾 Xác nhận lưu địa chỉ chuẩn này", type="primary", key="save_ai_fix"):
+                    for d in st.session_state.app_data_ai:
+                        if d['id'] == sel_id_ai:
+                            d.update({'new': final_edit_ai, 'confidence': 'Đã xác nhận', 'is_error': False})
+                    st.rerun()
 
     elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
-            # CHỈ XUẤT CỘT ĐỊA CHỈ ĐẦU VÀO VÀ KẾT QUẢ AI SẠCH SẼ
-            df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new']].rename(columns={'old': 'Địa chỉ Đầu vào', 'new': 'Địa chỉ AI Dịch ngược'})
+            # XUẤT ĐỦ 3 CỘT: ĐỊA CHỈ ĐẦU VÀO, KẾT QUẢ AI, MỨC ĐỘ TIN CẬY
+            df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'confidence']].rename(
+                columns={'old': 'Địa chỉ Đầu vào', 'new': 'Địa chỉ AI Dịch ngược', 'confidence': 'Mức độ tin cậy'}
+            )
             st.dataframe(df_out_ai, use_container_width=True)
-            st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
+            st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
         else: st.info("Chưa có dữ liệu. Vui lòng chạy phân tích AI ở tab đầu tiên trước!")
