@@ -412,17 +412,15 @@ with tab4:
                             try:
                                 model = genai.GenerativeModel(selected_model)
                                 prompt = f"""
-                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. 
-                                Nhiệm vụ: Sửa lỗi địa chỉ đầu vào và tra ngược về địa chỉ cũ NGAY TRƯỚC đợt sáp nhập hành chính giai đoạn 2023-2025. 
-                                TUYỆT ĐỐI KHÔNG lùi về các mốc lịch sử quá xa (như năm 2005, 1997...).
+                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (phiên bản trước sáp nhập 2023-2025).
 
-                                Địa chỉ đầu vào: "{new_address_input}"
+                                Địa chỉ đầu vào (có thể bị mâu thuẫn/gõ sai): "{new_address_input}"
                                 
-                                Yêu cầu bắt buộc:
-                                1. Sửa lỗi sai hành chính hiện tại trước: (Ví dụ: Cẩm Lệ là Quận, không phải Phường. Đường Nguyễn Như Đãi và Tổ 20 thực tế nằm ở Phường nào thuộc Quận Cẩm Lệ hiện nay?).
-                                2. Khung thời gian: Chỉ xét sáp nhập giai đoạn 2024-2025. Nếu địa bàn đó không bị sáp nhập trong đợt này, hãy trả về kết quả đúng của hiện tại.
-                                3. Format trả về ngắn gọn: [Số nhà/Đường], [Phường/Xã (phiên bản trước 2025)], [Quận/Huyện], [Tỉnh/Thành phố].
-                                4. Viết 1 dòng giải thích: Nêu rõ lỗi gõ sai đã sửa (nếu có) và tình trạng sáp nhập (nếu có).
+                                NGUYÊN TẮC SUY LUẬN BẮT BUỘC (Đọc kỹ):
+                                1. Xử lý mâu thuẫn: Nếu địa chỉ có sự mâu thuẫn (VD: Phường A ở Tỉnh B nhưng người dùng gõ Tỉnh C), BẮT BUỘC phải ưu tiên giữ nguyên các đơn vị CẤP NHỎ (Khu phố, Đường, Phường) để làm chuẩn, từ đó sửa lại CẤP LỚN (Quận/Huyện, Tỉnh) cho đúng. (Ví dụ: Thấy Ninh Chữ thì phải tự biết đó là Ninh Thuận và sửa lại tỉnh).
+                                2. Khung thời gian: Chỉ xét lịch sử sáp nhập trong khoảng 2023-2025. Không lùi về các năm như 2005, 1997...
+                                3. Format trả về 1 dòng duy nhất: [Số nhà/Đường/Khu phố], [Phường/Xã CŨ], [Quận/Huyện CŨ], [Tỉnh/Thành phố CŨ].
+                                4. Dòng tiếp theo ghi: "Giải thích: [Nêu ngắn gọn lý do sửa lỗi Tỉnh/Huyện hoặc tình trạng sáp nhập]"
                                 """
                                 
                                 response = model.generate_content(prompt)
