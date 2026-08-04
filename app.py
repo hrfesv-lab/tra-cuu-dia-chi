@@ -408,28 +408,24 @@ with tab4:
                     if not new_address_input:
                         st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
                     else:
-                      with st.spinner(f"Đang kết nối não bộ {selected_model}... (Chế độ Turbo)"):
+                      with st.spinner(f"Đang kết nối não bộ {selected_model}..."):
                             try:
-                                # Nới lỏng một chút xíu để AI không bị "đơ" (0.2 thay vì 0)
-                                generation_config = {
-                                    "temperature": 0.2, 
-                                    "max_output_tokens": 300, # Cho phép độ dài câu trả lời thoải mái hơn
-                                }
-                                
-                                model = genai.GenerativeModel(selected_model, generation_config=generation_config)
+                                # GỠ BỎ HOÀN TOÀN GIỚI HẠN TỐC ĐỘ / TOKENS ĐỂ AI KHÔNG BỊ ĐỨT ĐOẠN
+                                model = genai.GenerativeModel(selected_model)
                                 
                                 prompt = f"""
-                                Bạn là chuyên gia địa lý Việt Nam. Nhiệm vụ: Sửa lỗi địa chỉ và tra ngược về địa chỉ chuẩn trước năm 2025.
+                                Bạn là chuyên gia địa lý Việt Nam. Nhiệm vụ của bạn là sửa lỗi địa chỉ đầu vào và tra ngược về địa chỉ chuẩn.
                                 Địa chỉ đầu vào: "{new_address_input}"
                                 
                                 Yêu cầu BẮT BUỘC:
-                                1. Dùng tên Đường (VD: Kha Vạn Cân) để xác định đúng tên Phường/Quận. (Phường Thủ Đức là gõ sai, Kha Vạn Cân phải thuộc phường Linh Chiểu/Linh Tây... thuộc TP Thủ Đức/Quận Thủ Đức cũ).
-                                2. TRẢ VỀ ĐẦY ĐỦ CHUỖI ĐỊA CHỈ theo format: [Số nhà/Đường], [Phường/Xã chuẩn], [Quận/Huyện/Thành phố thuộc tỉnh], [Tỉnh/Thành phố trung ương].
-                                3. Xuống dòng và ghi chữ "Giải thích:" kèm lý do ngắn gọn.
+                                1. Sửa các lỗi sai cấp hành chính. (Ví dụ: Thủ Đức là Thành phố/Quận, không phải Phường. Đường Kha Vạn Cân phải thuộc phường Linh Chiểu/Linh Tây... thuộc Thủ Đức).
+                                2. TRẢ VỀ ĐẦY ĐỦ VÀ TRỌN VẸN toàn bộ chuỗi địa chỉ các cấp. Tuyệt đối không được bỏ dở giữa chừng.
+                                3. Format chuẩn: [Số nhà/Đường], [Phường/Xã chuẩn], [Quận/Huyện/TP thuộc tỉnh], [Tỉnh/Thành phố trung ương].
+                                4. Xuống dòng ghi "Giải thích:" và giải thích ngắn gọn.
                                 """
                                 
                                 response = model.generate_content(prompt)
-                                st.success("⚡ Kết quả (Chế độ siêu tốc):")
+                                st.success("🎉 Kết quả từ AI:")
                                 st.write(response.text)
                                 
                             except Exception as e:
