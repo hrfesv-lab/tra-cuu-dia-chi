@@ -2,3 +2,4 @@ pandas
 streamlit
 openpyxl
 google-generativeai
+streamlit-option-menu
