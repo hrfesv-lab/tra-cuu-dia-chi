@@ -217,12 +217,12 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
         Danh sách:
         {json.dumps(batch, ensure_ascii=False)}
         
-        Yêu cầu BẮT BUỘC:
+        Yêu cầu BẮT BUỘC KHẮT KHE:
         1. Trả về kết quả dưới dạng JSON hợp lệ. Key là địa chỉ gốc, Value là một Object chứa 2 trường: "address" và "confidence".
         2. Trường "confidence" ghi nhận mức độ tin cậy:
-           - "Cao": Nếu biết rõ lịch sử sáp nhập/địa giới chính xác.
-           - "Trung bình": Nếu giữ nguyên địa chỉ hoặc sửa lỗi chính tả nhẹ.
-           - "Nghi ngờ": Nếu địa chỉ bị mâu thuẫn lớn (VD: tên phường ở tỉnh này nhưng đuôi lại ghi tỉnh khác), thiếu thông tin nghiêm trọng, hoặc bạn không chắc chắn.
+           - "Cao": CHỈ DÙNG KHI bạn biết rõ 100% lịch sử sáp nhập địa giới chính xác.
+           - "Trung bình": Giữ nguyên địa chỉ hoặc sửa lỗi chính tả nhẹ.
+           - "Nghi ngờ": BẮT BUỘC ĐÁNH "Nghi ngờ" nếu địa chỉ có dấu hiệu sai tên Phường/Đường với thực tế (VD: Đường 15 Tam Bình nhưng thực chất thuộc Bình Chiểu, hoặc mâu thuẫn Tỉnh/Huyện).
         3. Trường "address": Chuỗi địa chỉ dự đoán theo format "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố cũ]".
         """
         
@@ -407,7 +407,6 @@ else:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
             st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
-    # TRẠM CẤP CỨU AI: FIX LỖI "KHÔNG NHẢY THEO PHƯỜNG"
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
         if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
@@ -440,7 +439,6 @@ else:
                 
                 old_options = [f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}" for _, row in matched_rows.iterrows()]
                 
-                # Hàm Callback tự động đẩy địa chỉ mới vào ô Text_Input ngay khi chọn Phường
                 def update_edit_text():
                     selected_old = st.session_state.old_unit_select
                     prefix = extract_street_prefix(sel_item_ai['old'])
@@ -453,7 +451,6 @@ else:
                     on_change=update_edit_text
                 )
                 
-                # Cởi tạo giá trị ban đầu nếu chưa có trong session_state
                 street_prefix = extract_street_prefix(sel_item_ai['old'])
                 default_val = f"{street_prefix}, {selected_old_unit}" if street_prefix else selected_old_unit
                 if "edit_ai_input" not in st.session_state:
@@ -465,15 +462,31 @@ else:
                     for d in st.session_state.app_data_ai:
                         if d['id'] == sel_id_ai:
                             d.update({'new': final_edit_ai, 'confidence': 'Đã xác nhận', 'is_error': False})
-                    # Xóa key để lượt cấp cứu sau không bị giữ giá trị cũ
                     if "edit_ai_input" in st.session_state: del st.session_state.edit_ai_input
                     st.rerun()
 
+    # TRẠM XUẤT DỮ LIỆU: BỔ SUNG TÍNH NĂNG "ĐẨY CA SAI SANG TRẠM CẤP CỨU"
     elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
             df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'confidence']].rename(
                 columns={'old': 'Địa chỉ Đầu vào', 'new': 'Địa chỉ AI Dịch ngược', 'confidence': 'Mức độ tin cậy'}
             )
             st.dataframe(df_out_ai, use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("##### 🚨 Phát hiện AI đoán sai dù đánh dấu 'Cao'?")
+            
+            c1, c2 = st.columns([3, 1])
+            ai_items_dict = {i['id']: f"Dòng {idx+1}: {i['old']} ➡️ [{i['new']}]" for idx, i in enumerate(st.session_state.app_data_ai)}
+            sel_wrong_id = c1.selectbox("Chọn dòng bạn phát hiện AI đoán sai:", options=list(ai_items_dict.keys()), format_func=lambda x: ai_items_dict[x], key="wrong_select")
+            
+            if c2.button("🚨 Đẩy sang Trạm cấp cứu", type="secondary"):
+                for d in st.session_state.app_data_ai:
+                    if d['id'] == sel_wrong_id:
+                        d.update({'confidence': 'Nghi ngờ', 'is_error': True})
+                st.success("✅ Đã chuyển ca này về 'Nghi ngờ'! Hãy sang Tab 'Trạm cấp cứu AI' để chỉnh lại nhé.")
+                st.rerun()
+                
+            st.markdown("---")
             st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
         else: st.info("Chưa có dữ liệu. Vui lòng chạy phân tích AI ở tab đầu tiên trước!")
