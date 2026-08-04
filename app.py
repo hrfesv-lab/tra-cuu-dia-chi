@@ -177,6 +177,24 @@ def force_convert_address(query, row):
     
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
+# HÀM BÓC TÁCH PHẦN SỐ NHÀ/ĐƯỜNG/THÔN/XÓM TỰ ĐỘNG
+def extract_street_prefix(address_str):
+    if not address_str: return ""
+    parts = [p.strip() for p in address_str.split(',') if p.strip()]
+    street_parts = []
+    
+    for p in parts:
+        # Nếu bắt gặp các từ khóa đơn vị hành chính thì dừng bóc tách
+        if re.search(r'(?i)\b(phường|xã|thị trấn|quận|huyện|thành phố|tỉnh|p\.|x\.|tt\.|q\.|h\.|tp\.|t\.)\b', p) or \
+           re.match(r'(?i)^(p|x|tt|q|h|tx|tp)\s*\d+', p):
+            break
+        street_parts.append(p)
+        
+    if street_parts:
+        return ", ".join(street_parts)
+    # Nếu không tách được theo dấu phẩy, lấy phần tử đầu tiên làm mặc định
+    return parts[0] if parts else ""
+
 # ==========================================
 # 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
 # ==========================================
@@ -391,7 +409,7 @@ else:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
             st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
-    # TRẠM CẤP CỨU AI: CÓ BẢNG THAM CHIẾU TRA CỨU ĐỊA CHỈ MỚI -> XÃ CỦ TƯƠNG ỨNG
+    # TRẠM CẤP CỨU AI: TỰ ĐỘNG BÓC TÁCH PREFIX VÀ GHÉP VỚI ĐƠN VỊ CỦ ĐƯỢC CHỌN
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
         if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
@@ -410,11 +428,9 @@ else:
                 df_tinh = df[df['Tỉnh mới'] == tinh_sel_new]
                 xa_sel_new = c2.selectbox("2. Chọn Phường/Xã MỚI chuẩn", ["-- Chọn --"] + sorted(df_tinh['Tên Xã mới'].dropna().unique().tolist()), key="xa_sel_new")
             
-            # HIỆN BẢNG THAM CHIẾU CHI TIẾT
             if xa_sel_new != "-- Chọn --":
                 matched_rows = df[(df['Tỉnh mới'] == tinh_sel_new) & (df['Tên Xã mới'] == xa_sel_new)]
                 
-                # Bảng hiển thị thông tin tham chiếu
                 st.markdown(f"""
                 <div class="ref-box">
                     💡 <b>BẢNG THAM CHIẾU ĐỊA GIỚI:</b><br>
@@ -422,20 +438,18 @@ else:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Hiển thị dataframe thu nhỏ làm bằng chứng tra cứu
                 st.dataframe(matched_rows[['Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].reset_index(drop=True), use_container_width=True)
                 
-                # NẠP DROPDOWN ĐỊA CHỈ CỦ ĐỂ NGƯỜI DÙNG CHỌN
                 old_options = [f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}" for _, row in matched_rows.iterrows()]
                 selected_old_unit = st.selectbox("3. Chọn Đơn vị CŨ gốc chính xác cho địa chỉ này:", options=old_options, key="old_unit_select")
                 
-                # TRÍCH XUẤT TÊN ĐƯỜNG/SỐ NHÀ BAN ĐẦU
-                input_addr = sel_item_ai['old']
-                parts = [p.strip() for p in input_addr.split(',') if p.strip()]
-                prefix_street = parts[0] if parts else ""
+                # TỰ ĐỘNG BÓC TÁCH SỐ NHÀ/ĐƯỜNG/THÔN/XÓM TỪ ĐỊA CHỈ ĐẦU VÀO
+                street_prefix = extract_street_prefix(sel_item_ai['old'])
                 
-                sug_addr_old = f"{prefix_street}, {selected_old_unit}"
-                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn hoàn chỉnh sau khi ghép:", value=sug_addr_old, key="edit_ai_input")
+                # TỰ ĐỘNG GHÉP NỐI PREFIX VỚI ĐƠN VỊ CỦ CHỌN TỪ DROPDOWN
+                sug_addr_old = f"{street_prefix}, {selected_old_unit}" if street_prefix else selected_old_unit
+                
+                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn hoàn chỉnh (Đã tự động kết hợp):", value=sug_addr_old, key="edit_ai_input")
                 
                 if st.button("💾 Xác nhận lưu địa chỉ CŨ chuẩn này", type="primary", key="save_ai_fix"):
                     for d in st.session_state.app_data_ai:
