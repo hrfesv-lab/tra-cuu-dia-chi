@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import unicodedata
+import google.generativeai as genai
 
 # ==========================================
 # 1. CÀI ĐẶT TRANG & CSS GIAO DIỆN
@@ -40,7 +41,7 @@ if 'app_data' not in st.session_state:
     st.session_state.app_data = []
 
 # ==========================================
-# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ
+# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ (CHIỀU CŨ -> MỚI)
 # ==========================================
 def get_core_name(name):
     if not name: return ""
@@ -149,12 +150,8 @@ def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix
         return re.sub(pattern_loose, new_name, query, count=1)
     return query
 
-# ==========================================
-# 3. HÀM XỬ LÝ LÕI
-# ==========================================
 def auto_convert_address(query):
     if not query or not db_records: return query, "", True
-    
     out_addr = normalize_formatting(query)
     query_search = normalize_for_search(out_addr)
     query_lower = query_search.lower()
@@ -165,7 +162,6 @@ def auto_convert_address(query):
     for row in db_records:
         if row['xa_core_lower'] not in query_lower or row['huyen_core_lower'] not in query_lower:
             continue
-            
         xa_cu = str(row['Tên Xã cũ'])
         huyen_cu = str(row['Huyện cũ'])
         xa_core = row['xa_core']
@@ -178,7 +174,6 @@ def auto_convert_address(query):
             tinh_cu = str(row['Tỉnh cũ'])
             tinh_core = row['tinh_core']
             tinh_score = get_match_score(tinh_cu, tinh_core, query_search, PREFIX_TINH_MAN)
-            
             total_score = xa_score + huyen_score + (tinh_score if tinh_score > 0 else 0)
             matches.append({'row': row, 'score': total_score})
             
@@ -189,7 +184,6 @@ def auto_convert_address(query):
         tinh_cu_db, tinh_moi_db = str(matched_row['Tỉnh cũ']), str(matched_row['Tỉnh mới'])
         huyen_cu_db = str(matched_row['Huyện cũ'])
         xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
-        
         tinh_core, huyen_core, xa_core = matched_row['tinh_core'], matched_row['huyen_core'], matched_row['xa_core']
         
         if get_match_score(tinh_cu_db, tinh_core, query_search, PREFIX_TINH_MAN) > 0 and tinh_cu_db.lower() != tinh_moi_db.lower():
@@ -207,17 +201,14 @@ def auto_convert_address(query):
     else:
         return out_addr, "Lỗi/Không tìm thấy vị trí", True
 
-# 🔥 HÀM ĐỘC QUYỀN CHO TAB 2: TƯ DUY LẮP RÁP CỦA BẠN
 def force_convert_address(query, matched_row):
     tinh_cu_db = str(matched_row['Tỉnh cũ'])
     huyen_cu_db = str(matched_row['Huyện cũ'])
     xa_cu_db = str(matched_row['Tên Xã cũ'])
-    
     tinh_core = matched_row['tinh_core']
     huyen_core = matched_row['huyen_core']
     xa_core = matched_row['xa_core']
 
-    # BƯỚC 1: LỌC PREFIX TỪ CÂU GỐC (Bỏ qua đoạn hành chính rác ở đuôi)
     parts = [p.strip() for p in query.split(',') if p.strip()]
     local_parts = []
     
@@ -246,32 +237,23 @@ def force_convert_address(query, matched_row):
             
     prefix = ", ".join(local_parts)
     
-    # Lấy Format Tỉnh gốc để xuất ra (Giữ TP. HCM thay vì Thành phố Hồ Chí Minh)
     original_tinh = parts[-1] if parts else tinh_cu_db
     tinh_to_use = tinh_cu_db
     if re.search(r'(?i)\b(hcm|hồ chí minh|hà nội|đà nẵng|hải phòng|tỉnh|thành phố|tp\.?|t\.?)\b', original_tinh):
         tinh_to_use = original_tinh
         
-    # BƯỚC 2: LẮP RÁP CHUỖI CŨ "CHUẨN KHÔNG CẦN CHỈNH"
     if prefix:
         fixed_old_query = f"{prefix}, {xa_cu_db}, {huyen_cu_db}, {tinh_to_use}"
     else:
         fixed_old_query = f"{xa_cu_db}, {huyen_cu_db}, {tinh_to_use}"
         
-    # BƯỚC 3: DÙNG DB ĐỂ BIẾN ĐỔI CHUỖI VỪA RÁP
     out_addr = fixed_old_query
-    
     tinh_moi_db = str(matched_row['Tỉnh mới'])
     xa_moi_db = str(matched_row['Tên Xã mới'])
     
-    # - Đổi Tỉnh (Nếu có)
     if tinh_cu_db.lower() != tinh_moi_db.lower():
         out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
-        
-    # - Xóa Huyện (Quy tắc tối thượng V11)
     out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-        
-    # - Đổi Xã
     if xa_cu_db.lower() != xa_moi_db.lower():
         out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
     
@@ -279,16 +261,15 @@ def force_convert_address(query, matched_row):
     return out_addr
 
 # ==========================================
-# 4. GIAO DIỆN WEB (TABS NGANG)
+# 3. GIAO DIỆN WEB (TABS NGANG)
 # ==========================================
 st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ")
 st.markdown("Hệ thống thông minh tự động gỡ bỏ các tiền tố (P., Q., TP...) khi sáp nhập.")
 
-tab1, tab2, tab3 = st.tabs(["🚀 1. Chuyển đổi hàng loạt", "🛠️ 2. Chuyển đổi đơn lẻ", "📥 3. Trạm xuất dữ liệu"])
+tab1, tab2, tab3, tab4 = st.tabs(["🚀 1. Chuyển đổi hàng loạt", "🛠️ 2. Chuyển đổi đơn lẻ", "📥 3. Trạm xuất dữ liệu", "⏪ 4. AI Dịch ngược (Mới -> Cũ)"])
 
 with tab1:
     col_input, col_info = st.columns([2, 1])
-    
     with col_input:
         input_text = st.text_area(
             "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
@@ -307,49 +288,42 @@ with tab1:
                         'id': i, 'old': query, 'new': new_addr, 'notes': note, 'is_error': is_err
                     })
                     progress_bar.progress((i + 1) / len(queries))
-                
                 st.rerun() 
             else:
                 st.warning("Vui lòng nhập dữ liệu!")
 
     with col_info:
-        st.info("💡 **Hướng dẫn:**\n\n1. Dán danh sách vào ô bên trái.\n2. Bấm chạy tự động.\n3. Nếu có địa chỉ lỗi, hãy sang Tab 2 để sửa thủ công.\n4. Sang Tab 3 để tải File CSV.")
-        
+        st.info("💡 **Hướng dẫn:**\n\n1. Dán danh sách vào ô bên trái.\n2. Bấm chạy tự động.\n3. Sang Tab 2 nếu có lỗi.\n4. Sang Tab 3 tải CSV.")
         if st.session_state.app_data:
             err_count = sum(1 for d in st.session_state.app_data if d['is_error'])
             succ_count = len(st.session_state.app_data) - err_count
-            st.success(f"✅ Đã xử lý tự động: **{succ_count}**")
+            st.success(f"✅ Đã xử lý: **{succ_count}**")
             if err_count > 0:
-                st.error(f"⚠️ Cần sửa tay: **{err_count}** (Xem Tab 2)")
+                st.error(f"⚠️ Lỗi: **{err_count}** (Xem Tab 2)")
 
 with tab2:
     error_items = [d for d in st.session_state.app_data if d['is_error']]
-    
     if not st.session_state.app_data:
         st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab 1 trước nhé!")
     elif not error_items:
-        st.success("🎉 Mọi địa chỉ đều đã được AI nhận diện thành công! Không có lỗi nào cần sửa.")
+        st.success("🎉 Mọi địa chỉ đều đã được AI nhận diện thành công!")
     else:
         error_dict = {item['id']: item['old'] for item in error_items}
-        selected_id = st.selectbox(f"🚨 Đang có {len(error_items)} địa chỉ cần bạn hỗ trợ. Vui lòng chọn:", options=list(error_dict.keys()), format_func=lambda x: error_dict[x])
+        selected_id = st.selectbox(f"🚨 Đang có {len(error_items)} địa chỉ cần bạn hỗ trợ:", options=list(error_dict.keys()), format_func=lambda x: error_dict[x])
         selected_item = next(item for item in st.session_state.app_data if item['id'] == selected_id)
         
         st.markdown(f"**📍 Địa chỉ gốc:** `{selected_item['old']}`")
         st.markdown("---")
-        st.markdown("### 🔍 Hỗ trợ AI tìm vị trí đúng trong Database:")
         
         col1, col2, col3 = st.columns(3)
         tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
-        
         with col1:
             tinh_sel = st.selectbox("1. Thuộc Tỉnh/Thành nào?", ["-- Chọn --"] + tinh_list)
-        
         huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
         if tinh_sel != "-- Chọn --":
             huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
             with col2:
                 huyen_sel = st.selectbox("2. Thuộc Quận/Huyện nào?", ["-- Chọn --"] + huyen_list)
-                
             if huyen_sel != "-- Chọn --":
                 xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
                 with col3:
@@ -360,9 +334,7 @@ with tab2:
             suggested_addr = force_convert_address(selected_item['old'], exact_row)
             
             st.markdown("---")
-            st.markdown("### 👀 Xem trước & Xác nhận kết quả")
-            final_edit = st.text_input("✍️ Địa chỉ sau khi sáp nhập sẽ là (Bạn có thể gõ để sửa lại):", value=suggested_addr)
-            
+            final_edit = st.text_input("✍️ Xem trước & Chỉnh sửa kết quả:", value=suggested_addr)
             col_btn1, col_btn2 = st.columns([1, 4])
             with col_btn1:
                 if st.button("💾 Xác nhận & Lưu", type="primary"):
@@ -387,7 +359,7 @@ with tab3:
     else:
         err_count = sum(1 for d in st.session_state.app_data if d['is_error'])
         if err_count > 0:
-            st.warning(f"⚠️ Chú ý: Vẫn còn {err_count} địa chỉ lỗi chưa được sửa ở Tab 2. Bạn có chắc muốn tải file bây giờ không?")
+            st.warning(f"⚠️ Chú ý: Vẫn còn {err_count} địa chỉ lỗi chưa được sửa ở Tab 2.")
             
         df_results = pd.DataFrame(st.session_state.app_data)
         df_display = df_results[['old', 'new', 'notes']].rename(columns={
@@ -395,15 +367,53 @@ with tab3:
             'new': 'Địa chỉ SAU chuyển đổi', 
             'notes': 'Ghi chú'
         })
-        
         st.dataframe(df_display, use_container_width=True)
-        
         csv_data = df_display.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            label="⬇️ TẢI FILE KẾT QUẢ HOÀN CHỈNH (CSV)",
-            data=csv_data,
-            file_name="Ket_Qua_Dia_Chi_Moi.csv",
-            mime="text/csv",
-            use_container_width=True,
-            type="primary"
+        st.download_button("⬇️ TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="Ket_Qua_Dia_Chi.csv", mime="text/csv", use_container_width=True, type="primary")
+
+# ==========================================
+# 4. TAB 4: TÍCH HỢP AI GEMINI (MỚI -> CŨ)
+# ==========================================
+with tab4:
+    st.markdown("### 🤖 Trợ lý AI: Dịch ngược địa chỉ MỚI về CŨ")
+    st.info("Nhập địa chỉ bị gõ sai hoặc địa chỉ mới sáp nhập. AI sẽ kết nối Internet để suy luận ra địa chỉ gốc mà không cần dùng đến file Excel.")
+    
+    col_ai_1, col_ai_2 = st.columns([1, 2])
+    with col_ai_1:
+        api_key_input = st.text_input("🔑 Nhập Google Gemini API Key:", type="password", help="Dùng để đánh thức AI")
+    
+    with col_ai_2:
+        new_address_input = st.text_input(
+            "📍 Nhập địa chỉ cần tra cứu:", 
+            placeholder="K29/2 Nguyễn Như Đãi, Tổ 20, Phường Cẩm Lệ, TP Đà Nẵng"
         )
+    
+    if st.button("⏪ Yêu cầu AI dịch ngược", type="primary"):
+        if not api_key_input:
+            st.error("Vui lòng nhập API Key!")
+        elif not new_address_input:
+            st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
+        else:
+            with st.spinner("Đang kết nối não bộ AI... (Mất khoảng 3-5 giây)"):
+                try:
+                    genai.configure(api_key=api_key_input)
+                    # Sử dụng model flash siêu tốc độ
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    prompt = f"""
+                    Bạn là một chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ của bạn là tra ngược địa chỉ hiện tại về địa chỉ cũ trước đợt sáp nhập gần nhất (hoặc sửa lại cho đúng tên Phường/Quận nếu người dùng gõ sai).
+                    Địa chỉ đầu vào bị lỗi/mới sáp nhập: "{new_address_input}"
+                    
+                    Yêu cầu:
+                    1. Kiểm tra xem tên Phường, Quận trong câu có gõ sai không. (Ví dụ: "Cẩm Lệ" là Quận chứ không phải Phường, đường "Nguyễn Như Đãi" thực tế nằm ở phường nào?).
+                    2. Tìm kiếm thông tin siêu vi mô (nếu có) như Tổ, Khóm để xác định chính xác Phường/Xã cũ.
+                    3. Format kết quả trả về bắt buộc: [Số nhà/Đường], [Phường/Xã CŨ chính xác], [Quận/Huyện CŨ chính xác], [Tỉnh/Thành phố].
+                    4. Viết 1-2 câu giải thích ngắn gọn vì sao bạn suy luận ra kết quả này ở dòng bên dưới.
+                    """
+                    
+                    response = model.generate_content(prompt)
+                    st.success("🎉 Kết quả suy luận từ AI:")
+                    st.write(response.text)
+                    
+                except Exception as e:
+                    st.error(f"Có lỗi xảy ra khi kết nối AI. Vui lòng kiểm tra lại API Key hoặc mạng: {e}")
