@@ -171,7 +171,8 @@ def force_convert_address(query, row):
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
 # ==========================================
-# 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
+# ==========================================
+# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - SIẾT NGUYÊN TẮC CHẮC CHẮN 100%
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
@@ -186,21 +187,19 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     if not uncached_addresses: return all_results
     
     batches = [uncached_addresses[i:i + batch_size] for i in range(0, len(uncached_addresses), batch_size)]
-    progress_bar = st.progress(0, text="Đang kết nối AI...")
+    progress_bar = st.progress(0, text="Đang kiểm tra độ chính xác dữ liệu...")
     
     for idx, batch in enumerate(batches):
-        # BỎ HOÀN TOÀN YÊU CẦU GIẢI THÍCH TRONG PROMPT
         prompt = f"""
-        Bạn là chuyên gia địa giới hành chính Việt Nam. Tra ngược danh sách địa chỉ MỚI sau đây về địa chỉ CŨ (trước sáp nhập 2025).
+        Bạn là hệ thống kiểm tra địa giới hành chính Việt Nam. Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (trước sáp nhập 2025).
         Danh sách:
         {json.dumps(batch, ensure_ascii=False)}
         
-        Luật suy luận:
-        - Ưu tiên cấp nhỏ (Đường/Khu phố) để sửa lỗi cấp lớn.
-        - Nếu địa chỉ chỉ có "Tổ/Khu phố" + "Quận/Huyện" (thiếu tên Đường/Phường), hãy trả về kết quả là: "LỖI: Thiếu dữ liệu đường/phường".
-        - Trả về DUY NHẤT một chuỗi JSON hợp lệ. Key là địa chỉ gốc, value là CHUỖI ĐỊA CHỈ HOÀN CHỈNH.
-        - TUYỆT ĐỐI KHÔNG thêm giải thích hay ký tự đặc biệt. 
-        - Format value chuẩn: "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố]".
+        QUY TẮC AN TOÀN DỮ LIỆU BẮT BUỘC (Đọc kỹ):
+        1. CHỈ TRẢ VỀ KẾT QUẢ KHI BẠN CHẮC CHẮN 100% VỀ MỐI TƯƠNG QUAN LỊCH SỬ SÁP NHẬP/ĐỊA GIỚI.
+        2. TUYỆT ĐỐI KHÔNG ĐOÁN BỪA: Nếu địa chỉ bị sai quá nặng, mâu thuẫn lớn giữa Tỉnh và Phường/Đường, hoặc thiếu dữ liệu không thể suy luận chính xác, BẮT BUỘC phải trả về value là: "LỖI: Cần kiểm tra thủ công".
+        3. Format trả về: Chuỗi JSON hợp lệ. Key là địa chỉ gốc, value là Địa chỉ chuẩn HOẶC chữ "LỖI: Cần kiểm tra thủ công".
+        4. Chuỗi địa chỉ chuẩn format: "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố cũ]". Không giải thích lề mề.
         """
         
         max_retries, delay = 3, 2
@@ -213,7 +212,6 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
                     
                 parsed_data = json.loads(text_res)
                 for k, v in parsed_data.items():
-                    # Lọc sạch nếu AI vẫn lỡ dính dấu |
                     clean_val = str(v).split("|")[0].strip()
                     st.session_state.ai_cache[k] = clean_val
                     all_results[k] = clean_val
@@ -221,7 +219,7 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
             except Exception as e:
                 if attempt < max_retries - 1: time.sleep(delay); delay *= 2
                 else:
-                    for addr in batch: all_results[addr] = f"LỖI: Lỗi API sau {max_retries} lần thử."
+                    for addr in batch: all_results[addr] = f"LỖI: Quá tải hệ thống API."
                     
         time.sleep(1)
         progress_bar.progress((idx + 1) / len(batches), text=f"Đang xử lý gói {idx + 1}/{len(batches)}...")
