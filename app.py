@@ -3,6 +3,8 @@ import pandas as pd
 import re
 import unicodedata
 import google.generativeai as genai
+import time
+import json
 
 # ==========================================
 # 1. CÀI ĐẶT TRANG & CSS GIAO DIỆN
@@ -13,35 +15,26 @@ hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            .stTabs [data-baseweb="tab-list"] {
-                gap: 24px;
-            }
+            .stTabs [data-baseweb="tab-list"] { gap: 24px; }
             .stTabs [data-baseweb="tab"] {
-                height: 50px;
-                white-space: pre-wrap;
-                background-color: #f0f2f6;
-                border-radius: 4px 4px 0px 0px;
-                gap: 1px;
-                padding-top: 10px;
-                padding-bottom: 10px;
-                padding-left: 20px;
-                padding-right: 20px;
+                height: 50px; white-space: pre-wrap; background-color: #f0f2f6;
+                border-radius: 4px 4px 0px 0px; gap: 1px; padding: 10px 20px;
             }
             .stTabs [aria-selected="true"] {
-                background-color: #ffffff;
-                border-bottom: 2px solid #ff4b4b;
-                color: #ff4b4b;
-                font-weight: bold;
+                background-color: #ffffff; border-bottom: 2px solid #ff4b4b;
+                color: #ff4b4b; font-weight: bold;
             }
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-if 'app_data' not in st.session_state:
-    st.session_state.app_data = []
+# Khởi tạo Session State
+if 'app_data_excel' not in st.session_state: st.session_state.app_data_excel = []
+if 'app_data_ai' not in st.session_state: st.session_state.app_data_ai = []
+if 'ai_cache' not in st.session_state: st.session_state.ai_cache = {}
 
 # ==========================================
-# 2. NẠP DỮ LIỆU & TIỀN XỬ LÝ (CHIỀU CŨ -> MỚI)
+# 2. HÀM XỬ LÝ EXCEL (CŨ -> MỚI)
 # ==========================================
 def get_core_name(name):
     if not name: return ""
@@ -52,38 +45,29 @@ def load_data():
     try:
         df = pd.read_excel('BangChuyendoiĐVHCmoi_cu_final.xlsx', sheet_name='Tổng hợp_không merge ', header=1)
         df = df.dropna(subset=['Tên Xã cũ', 'Tên Xã mới'])
-        
         def clean_code(text):
             if pd.isna(text): return ""
             text = unicodedata.normalize('NFC', str(text))
             return re.sub(r'\s*\(\d+\)', '', text).strip()
-            
         df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
         huyen_col = 'Quận/huyện cũ' if 'Quận/huyện cũ' in df.columns else 'Quận/huyện'
         df['Huyện cũ'] = df[huyen_col].apply(clean_code)
         df['Tỉnh cũ'] = df['Tỉnh cũ'].apply(clean_code)
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
-        
         df['xa_core'] = df['Tên Xã cũ'].apply(get_core_name)
         df['huyen_core'] = df['Huyện cũ'].apply(get_core_name)
         df['tinh_core'] = df['Tỉnh cũ'].apply(get_core_name)
-        
         df['xa_core_lower'] = df['xa_core'].str.lower()
         df['huyen_core_lower'] = df['huyen_core'].str.lower()
-        
-        records = df.to_dict('records')
-        return df, records
+        return df, df.to_dict('records')
     except Exception as e:
-        st.error(f"Lỗi đọc file Excel: {e}")
         return pd.DataFrame(), []
 
 df, db_records = load_data()
-
 PREFIX_XA_OPT = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)?'
 PREFIX_HUYEN_OPT = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)?'
 PREFIX_TINH_OPT = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)?'
-
 PREFIX_XA_MAN = r'(?:(?:phường|xã|thị trấn|p\.?|x\.?|tt\.?)\s*)'
 PREFIX_HUYEN_MAN = r'(?:(?:quận|huyện|thành phố|thị xã|tp\.?|q\.?|h\.?|tx\.?)\s*)'
 PREFIX_TINH_MAN = r'(?:(?:tỉnh|thành phố|tp\.?|t\.?)\s*)'
@@ -98,8 +82,6 @@ def normalize_formatting(query):
 def normalize_for_search(query):
     query = re.sub(r'\b(tp\.?\s*hcm|tphcm|tp\.\s*hồ chí minh)\b', 'Thành phố Hồ Chí Minh', query, flags=re.IGNORECASE)
     query = re.sub(r'\b(tp\.?\s*hn|tphn|tp\.\s*hà nội)\b', 'Thành phố Hà Nội', query, flags=re.IGNORECASE)
-    query = re.sub(r'\b(tp\.?\s*đn|tp\.\s*đà nẵng)\b', 'Thành phố Đà Nẵng', query, flags=re.IGNORECASE)
-    query = re.sub(r'\b(tp\.?\s*hp|tp\.\s*hải phòng)\b', 'Thành phố Hải Phòng', query, flags=re.IGNORECASE)
     return query
 
 def get_match_score(full_name, core_name, query, prefix_man):
@@ -109,45 +91,30 @@ def get_match_score(full_name, core_name, query, prefix_man):
     if re.search(r'(?i)\b' + re.escape(full_name) + r'(?!\w)', query): return 4
     if re.search(r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)', query): return 3
     if re.search(r'(?i)(?:^|,\s*)' + re.escape(core_name) + r'\s*(?=$|,)', query): return 2
-    if not core_name.isdigit():
-        if re.search(r'(?i)\b' + re.escape(core_name) + r'(?!\w)', query): return 1
+    if not core_name.isdigit() and re.search(r'(?i)\b' + re.escape(core_name) + r'(?!\w)', query): return 1
     return 0
 
 def remove_part_smart(query, full_name, core_name, prefix_opt, prefix_man):
-    pattern_full = r'(?i)(?:^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_full, '', query, count=1)
-    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
-    pattern_full_loose = r'(?i)\b' + re.escape(full_name) + r'(?!\w)\s*'
-    out, count = re.subn(pattern_full_loose, '', query, count=1)
-    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
-    pattern_strict = r'(?i)(?:^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_strict, '', query, count=1)
-    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
-    pattern_prefix = r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)\s*'
-    out, count = re.subn(pattern_prefix, '', query, count=1)
-    if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
+    for pattern in [r'(?i)(?:^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)', 
+                    r'(?i)\b' + re.escape(full_name) + r'(?!\w)\s*',
+                    r'(?i)(?:^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)',
+                    r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)\s*']:
+        out, count = re.subn(pattern, '', query, count=1)
+        if count > 0: return re.sub(r',\s*,', ',', out).strip(', ')
     if not core_name.isdigit():
-        pattern_loose = r'(?i)\b' + re.escape(core_name) + r'(?!\w)\s*'
-        out = re.sub(pattern_loose, '', query, count=1)
+        out = re.sub(r'(?i)\b' + re.escape(core_name) + r'(?!\w)\s*', '', query, count=1)
         return re.sub(r',\s*,', ',', out).strip(', ')
     return query
 
 def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix_man):
-    pattern_full = r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_full, lambda m: f"{m.group(1)}{new_name}", query, count=1)
-    if count > 0: return out
-    pattern_full_loose = r'(?i)\b' + re.escape(full_name) + r'(?!\w)'
-    out, count = re.subn(pattern_full_loose, new_name, query, count=1)
-    if count > 0: return out
-    pattern_strict = r'(?i)(^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)'
-    out, count = re.subn(pattern_strict, lambda m: f"{m.group(1)}{new_name}", query, count=1)
-    if count > 0: return out
-    pattern_prefix = r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)'
-    out, count = re.subn(pattern_prefix, new_name, query, count=1)
-    if count > 0: return out
-    if not core_name.isdigit():
-        pattern_loose = r'(?i)\b' + re.escape(core_name) + r'(?!\w)'
-        return re.sub(pattern_loose, new_name, query, count=1)
+    for pattern in [r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)', 
+                    r'(?i)(^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)']:
+        out, count = re.subn(pattern, lambda m: f"{m.group(1)}{new_name}", query, count=1)
+        if count > 0: return out
+    for pattern in [r'(?i)\b' + re.escape(full_name) + r'(?!\w)', r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)']:
+        out, count = re.subn(pattern, new_name, query, count=1)
+        if count > 0: return out
+    if not core_name.isdigit(): return re.sub(r'(?i)\b' + re.escape(core_name) + r'(?!\w)', new_name, query, count=1)
     return query
 
 def auto_convert_address(query):
@@ -155,283 +122,254 @@ def auto_convert_address(query):
     out_addr = normalize_formatting(query)
     query_search = normalize_for_search(out_addr)
     query_lower = query_search.lower()
-    
-    notes = []
-    matches = []
+    notes, matches = [], []
     
     for row in db_records:
-        if row['xa_core_lower'] not in query_lower or row['huyen_core_lower'] not in query_lower:
-            continue
-        xa_cu = str(row['Tên Xã cũ'])
-        huyen_cu = str(row['Huyện cũ'])
-        xa_core = row['xa_core']
-        huyen_core = row['huyen_core']
-        
-        xa_score = get_match_score(xa_cu, xa_core, query_search, PREFIX_XA_MAN)
-        huyen_score = get_match_score(huyen_cu, huyen_core, query_search, PREFIX_HUYEN_MAN)
-        
+        if row['xa_core_lower'] not in query_lower or row['huyen_core_lower'] not in query_lower: continue
+        xa_score = get_match_score(str(row['Tên Xã cũ']), row['xa_core'], query_search, PREFIX_XA_MAN)
+        huyen_score = get_match_score(str(row['Huyện cũ']), row['huyen_core'], query_search, PREFIX_HUYEN_MAN)
         if xa_score > 0 and huyen_score > 0:
-            tinh_cu = str(row['Tỉnh cũ'])
-            tinh_core = row['tinh_core']
-            tinh_score = get_match_score(tinh_cu, tinh_core, query_search, PREFIX_TINH_MAN)
-            total_score = xa_score + huyen_score + (tinh_score if tinh_score > 0 else 0)
-            matches.append({'row': row, 'score': total_score})
+            tinh_score = get_match_score(str(row['Tỉnh cũ']), row['tinh_core'], query_search, PREFIX_TINH_MAN)
+            matches.append({'row': row, 'score': xa_score + huyen_score + (tinh_score if tinh_score > 0 else 0)})
             
     if matches:
         matches.sort(key=lambda x: x['score'], reverse=True)
-        matched_row = matches[0]['row']
-                    
-        tinh_cu_db, tinh_moi_db = str(matched_row['Tỉnh cũ']), str(matched_row['Tỉnh mới'])
-        huyen_cu_db = str(matched_row['Huyện cũ'])
-        xa_cu_db, xa_moi_db = str(matched_row['Tên Xã cũ']), str(matched_row['Tên Xã mới'])
-        tinh_core, huyen_core, xa_core = matched_row['tinh_core'], matched_row['huyen_core'], matched_row['xa_core']
+        row = matches[0]['row']
+        tinh_cu, tinh_moi = str(row['Tỉnh cũ']), str(row['Tỉnh mới'])
+        xa_cu, xa_moi = str(row['Tên Xã cũ']), str(row['Tên Xã mới'])
+        huyen_cu = str(row['Huyện cũ'])
         
-        if get_match_score(tinh_cu_db, tinh_core, query_search, PREFIX_TINH_MAN) > 0 and tinh_cu_db.lower() != tinh_moi_db.lower():
-            out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
-            notes.append(f"Tỉnh ➡️ {tinh_moi_db}")
-            
-        out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-        notes.append(f"Bỏ Huyện")
-            
-        if xa_cu_db.lower() != xa_moi_db.lower():
-            out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
-            notes.append(f"Xã ➡️ {xa_moi_db}")
-        
-        return out_addr, " | ".join(notes) if notes else "Chuẩn hóa", False
-    else:
-        return out_addr, "Lỗi/Không tìm thấy vị trí", True
+        if get_match_score(tinh_cu, row['tinh_core'], query_search, PREFIX_TINH_MAN) > 0 and tinh_cu.lower() != tinh_moi.lower():
+            out_addr = replace_part_smart(out_addr, tinh_cu, row['tinh_core'], tinh_moi, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
+            notes.append(f"Tỉnh ➡️ {tinh_moi}")
+        out_addr = remove_part_smart(out_addr, huyen_cu, row['huyen_core'], PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+        notes.append("Bỏ Huyện")
+        if xa_cu.lower() != xa_moi.lower():
+            out_addr = replace_part_smart(out_addr, xa_cu, row['xa_core'], xa_moi, PREFIX_XA_OPT, PREFIX_XA_MAN)
+            notes.append(f"Xã ➡️ {xa_moi}")
+        return out_addr, " | ".join(notes), False
+    return out_addr, "Lỗi/Không tìm thấy vị trí", True
 
-def force_convert_address(query, matched_row):
-    tinh_cu_db = str(matched_row['Tỉnh cũ'])
-    huyen_cu_db = str(matched_row['Huyện cũ'])
-    xa_cu_db = str(matched_row['Tên Xã cũ'])
-    tinh_core = matched_row['tinh_core']
-    huyen_core = matched_row['huyen_core']
-    xa_core = matched_row['xa_core']
-
+def force_convert_address(query, row):
     parts = [p.strip() for p in query.split(',') if p.strip()]
     local_parts = []
-    
     for p in parts:
-        p_lower = p.lower()
-        p_core = get_core_name(p).lower()
+        p_core, p_lower = get_core_name(p).lower(), p.lower()
         is_admin = False
-        
-        if re.match(r'(?i)^(phường|xã|thị trấn|p\.|x\.|tt\.|quận|huyện|thành phố|thị xã|q\.|h\.|tx\.|tp\.|tỉnh|t\.)\b', p):
+        if re.match(r'(?i)^(phường|xã|thị trấn|p\.|x\.|tt\.|quận|huyện|thành phố|thị xã|q\.|h\.|tx\.|tp\.|tỉnh|t\.)\b', p) or \
+           re.match(r'(?i)^(p|x|tt|q|h|tx|tp)\s*\d+', p) or \
+           (row['xa_core'] and p_core == row['xa_core'].lower()) or \
+           (row['huyen_core'] and p_core == row['huyen_core'].lower()) or \
+           (row['tinh_core'] and p_core == row['tinh_core'].lower()) or \
+           re.search(r'\b(hcm|hồ chí minh|hà nội|đà nẵng|hải phòng)\b', p_lower):
             is_admin = True
-        elif re.match(r'(?i)^(p|x|tt|q|h|tx|tp)\s*\d+', p):
-            is_admin = True
-        elif xa_core and p_core == xa_core.lower():
-            is_admin = True
-        elif huyen_core and p_core == huyen_core.lower():
-            is_admin = True
-        elif tinh_core and p_core == tinh_core.lower():
-            is_admin = True
-        elif re.search(r'\b(hcm|hồ chí minh|hà nội|đà nẵng|hải phòng)\b', p_lower):
-            is_admin = True
-            
-        if not is_admin:
-            local_parts.append(p)
-        else:
-            break 
+        if not is_admin: local_parts.append(p)
+        else: break
             
     prefix = ", ".join(local_parts)
+    tinh_to_use = parts[-1] if parts and re.search(r'(?i)\b(hcm|hồ chí minh|hà nội|đà nẵng|hải phòng|tỉnh|thành phố|tp\.?|t\.?)\b', parts[-1]) else str(row['Tỉnh cũ'])
+    out_addr = f"{prefix}, {row['Tên Xã cũ']}, {row['Huyện cũ']}, {tinh_to_use}" if prefix else f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {tinh_to_use}"
     
-    original_tinh = parts[-1] if parts else tinh_cu_db
-    tinh_to_use = tinh_cu_db
-    if re.search(r'(?i)\b(hcm|hồ chí minh|hà nội|đà nẵng|hải phòng|tỉnh|thành phố|tp\.?|t\.?)\b', original_tinh):
-        tinh_to_use = original_tinh
-        
-    if prefix:
-        fixed_old_query = f"{prefix}, {xa_cu_db}, {huyen_cu_db}, {tinh_to_use}"
-    else:
-        fixed_old_query = f"{xa_cu_db}, {huyen_cu_db}, {tinh_to_use}"
-        
-    out_addr = fixed_old_query
-    tinh_moi_db = str(matched_row['Tỉnh mới'])
-    xa_moi_db = str(matched_row['Tên Xã mới'])
+    if str(row['Tỉnh cũ']).lower() != str(row['Tỉnh mới']).lower():
+        out_addr = replace_part_smart(out_addr, str(row['Tỉnh cũ']), row['tinh_core'], str(row['Tỉnh mới']), PREFIX_TINH_OPT, PREFIX_TINH_MAN)
+    out_addr = remove_part_smart(out_addr, str(row['Huyện cũ']), row['huyen_core'], PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
+    if str(row['Tên Xã cũ']).lower() != str(row['Tên Xã mới']).lower():
+        out_addr = replace_part_smart(out_addr, str(row['Tên Xã cũ']), row['xa_core'], str(row['Tên Xã mới']), PREFIX_XA_OPT, PREFIX_XA_MAN)
     
-    if tinh_cu_db.lower() != tinh_moi_db.lower():
-        out_addr = replace_part_smart(out_addr, tinh_cu_db, tinh_core, tinh_moi_db, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
-    out_addr = remove_part_smart(out_addr, huyen_cu_db, huyen_core, PREFIX_HUYEN_OPT, PREFIX_HUYEN_MAN)
-    if xa_cu_db.lower() != xa_moi_db.lower():
-        out_addr = replace_part_smart(out_addr, xa_cu_db, xa_core, xa_moi_db, PREFIX_XA_OPT, PREFIX_XA_MAN)
-    
-    out_addr = re.sub(r',\s*,', ',', out_addr).strip(', ')
-    return out_addr
+    return re.sub(r',\s*,', ',', out_addr).strip(', ')
+
 
 # ==========================================
-# 3. GIAO DIỆN WEB (TABS NGANG)
+# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - COMBO 3 TRONG 1
 # ==========================================
-st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ")
-st.markdown("Hệ thống thông minh tự động gỡ bỏ các tiền tố (P., Q., TP...) khi sáp nhập.")
-
-tab1, tab2, tab3, tab4 = st.tabs(["🚀 1. Chuyển đổi hàng loạt", "🛠️ 2. Chuyển đổi đơn lẻ", "📥 3. Trạm xuất dữ liệu", "⏪ 4. AI Dịch ngược (Mới -> Cũ)"])
-
-with tab1:
-    col_input, col_info = st.columns([2, 1])
-    with col_input:
-        input_text = st.text_area(
-            "Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", 
-            height=250,
-            placeholder="Ví dụ:\n182 Phạm Phú Thứ, Phường 4, Quận 6, TP. HCM"
-        )
-        if st.button("🔄 Bắt đầu chạy tự động", type="primary", use_container_width=True):
-            if input_text.strip():
-                queries = [q.strip() for q in input_text.split('\n') if q.strip()]
-                st.session_state.app_data = [] 
-                
-                progress_bar = st.progress(0)
-                for i, query in enumerate(queries):
-                    new_addr, note, is_err = auto_convert_address(query)
-                    st.session_state.app_data.append({
-                        'id': i, 'old': query, 'new': new_addr, 'notes': note, 'is_error': is_err
-                    })
-                    progress_bar.progress((i + 1) / len(queries))
-                st.rerun() 
-            else:
-                st.warning("Vui lòng nhập dữ liệu!")
-
-    with col_info:
-        st.info("💡 **Hướng dẫn:**\n\n1. Dán danh sách vào ô bên trái.\n2. Bấm chạy tự động.\n3. Sang Tab 2 nếu có lỗi.\n4. Sang Tab 3 tải CSV.")
-        if st.session_state.app_data:
-            err_count = sum(1 for d in st.session_state.app_data if d['is_error'])
-            succ_count = len(st.session_state.app_data) - err_count
-            st.success(f"✅ Đã xử lý: **{succ_count}**")
-            if err_count > 0:
-                st.error(f"⚠️ Lỗi: **{err_count}** (Xem Tab 2)")
-
-with tab2:
-    error_items = [d for d in st.session_state.app_data if d['is_error']]
-    if not st.session_state.app_data:
-        st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab 1 trước nhé!")
-    elif not error_items:
-        st.success("🎉 Mọi địa chỉ đều đã được AI nhận diện thành công!")
-    else:
-        error_dict = {item['id']: item['old'] for item in error_items}
-        selected_id = st.selectbox(f"🚨 Đang có {len(error_items)} địa chỉ cần bạn hỗ trợ:", options=list(error_dict.keys()), format_func=lambda x: error_dict[x])
-        selected_item = next(item for item in st.session_state.app_data if item['id'] == selected_id)
+def process_batch_with_intelligence(model, address_list, batch_size=5):
+    all_results = {}
+    uncached_addresses = []
+    
+    # 1. Trích xuất từ Cache
+    for addr in address_list:
+        if addr in st.session_state.ai_cache:
+            all_results[addr] = st.session_state.ai_cache[addr]
+        else:
+            uncached_addresses.append(addr)
+            
+    if not uncached_addresses: return all_results
+    
+    # 2. Gom nhóm Batch
+    batches = [uncached_addresses[i:i + batch_size] for i in range(0, len(uncached_addresses), batch_size)]
+    progress_bar = st.progress(0, text="Đang xử lý AI...")
+    
+    for idx, batch in enumerate(batches):
+        prompt = f"""
+        Bạn là chuyên gia địa giới hành chính Việt Nam. Tra ngược danh sách địa chỉ MỚI sau đây về địa chỉ CŨ (trước sáp nhập 2025).
+        Danh sách:
+        {json.dumps(batch, ensure_ascii=False)}
         
-        st.markdown(f"**📍 Địa chỉ gốc:** `{selected_item['old']}`")
-        st.markdown("---")
+        Luật suy luận:
+        - Ưu tiên cấp nhỏ (Đường/Khu phố) để sửa lỗi cấp lớn.
+        - Nếu địa chỉ chỉ có "Tổ/Khu phố" + "Quận/Huyện" (thiếu tên Đường/Phường), hãy trả về kết quả là: "LỖI: Thiếu dữ liệu đường/phường".
+        - Trả về DUY NHẤT một chuỗi JSON hợp lệ. Key là địa chỉ gốc, value là kết quả.
+        - Format value chuẩn: "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố] | Giải thích".
+        """
         
-        col1, col2, col3 = st.columns(3)
-        tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
-        with col1:
-            tinh_sel = st.selectbox("1. Thuộc Tỉnh/Thành nào?", ["-- Chọn --"] + tinh_list)
-        huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
-        if tinh_sel != "-- Chọn --":
-            huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
-            with col2:
-                huyen_sel = st.selectbox("2. Thuộc Quận/Huyện nào?", ["-- Chọn --"] + huyen_list)
-            if huyen_sel != "-- Chọn --":
-                xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
-                with col3:
-                    xa_sel = st.selectbox("3. Thuộc Phường/Xã nào?", ["-- Chọn --"] + xa_list)
+        # 3. Ngủ đông & Thử lại (Backoff)
+        max_retries, delay = 3, 2
+        for attempt in range(max_retries):
+            try:
+                response = model.generate_content(prompt)
+                text_res = response.text.strip()
+                if text_res.startswith("```json"): text_res = text_res[7:-3].strip()
+                elif text_res.startswith("```"): text_res = text_res[3:-3].strip()
                     
-        if xa_sel != "-- Chọn --":
-            exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
-            suggested_addr = force_convert_address(selected_item['old'], exact_row)
-            
-            st.markdown("---")
-            final_edit = st.text_input("✍️ Xem trước & Chỉnh sửa kết quả:", value=suggested_addr)
-            col_btn1, col_btn2 = st.columns([1, 4])
-            with col_btn1:
-                if st.button("💾 Xác nhận & Lưu", type="primary"):
-                    for d in st.session_state.app_data:
-                        if d['id'] == selected_id:
-                            d['new'] = final_edit
-                            d['is_error'] = False
-                            d['notes'] = "✅ Đã sửa thủ công"
-                    st.rerun()
-            with col_btn2:
-                if st.button("⚠️ Giữ nguyên địa chỉ gốc"):
-                    for d in st.session_state.app_data:
-                        if d['id'] == selected_id:
-                            d['new'] = selected_item['old']
-                            d['is_error'] = False
-                            d['notes'] = "Giữ nguyên"
-                    st.rerun()
+                parsed_data = json.loads(text_res)
+                for k, v in parsed_data.items():
+                    st.session_state.ai_cache[k] = v
+                    all_results[k] = v
+                break
+            except Exception as e:
+                if attempt < max_retries - 1: time.sleep(delay); delay *= 2
+                else:
+                    for addr in batch: all_results[addr] = f"LỖI: Lỗi API sau {max_retries} lần thử."
+                    
+        time.sleep(1) # Chống spam API
+        progress_bar.progress((idx + 1) / len(batches), text=f"Đang xử lý {idx + 1}/{len(batches)} gói...")
+        
+    progress_bar.empty()
+    return all_results
 
-with tab3:
-    if not st.session_state.app_data:
-        st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab 1 trước nhé!")
-    else:
-        err_count = sum(1 for d in st.session_state.app_data if d['is_error'])
-        if err_count > 0:
-            st.warning(f"⚠️ Chú ý: Vẫn còn {err_count} địa chỉ lỗi chưa được sửa ở Tab 2.")
-            
-        df_results = pd.DataFrame(st.session_state.app_data)
-        df_display = df_results[['old', 'new', 'notes']].rename(columns={
-            'old': 'Địa chỉ GỐC', 
-            'new': 'Địa chỉ SAU chuyển đổi', 
-            'notes': 'Ghi chú'
-        })
-        st.dataframe(df_display, use_container_width=True)
-        csv_data = df_display.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button("⬇️ TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="Ket_Qua_Dia_Chi.csv", mime="text/csv", use_container_width=True, type="primary")
 
 # ==========================================
+# 4. GIAO DIỆN CHÍNH (SIDEBAR + TABS)
 # ==========================================
-# 4. TAB 4: TÍCH HỢP AI GEMINI (MỚI -> CŨ)
-# ==========================================
-with tab4:
-    st.markdown("### 🤖 Trợ lý AI: Dịch ngược địa chỉ MỚI về CŨ")
-    st.info("Hệ thống tự động quét các phiên bản AI mà API Key của bạn hỗ trợ để tránh lỗi kết nối.")
+st.sidebar.title("📍 BẢNG ĐIỀU KHIỂN")
+mode = st.sidebar.radio("Chọn hướng xử lý:", [
+    "🚀 A. CŨ ➡️ MỚI (Dùng Excel)", 
+    "🤖 B. MỚI ➡️ CŨ (Dùng AI)"
+])
+
+# ------------------------------------------
+# PHÂN HỆ A: EXCEL (CŨ -> MỚI)
+# ------------------------------------------
+if "A. CŨ" in mode:
+    st.title("🚀 HỆ THỐNG: CHUYỂN CŨ ➡️ MỚI")
+    tab1, tab2, tab3 = st.tabs(["📋 1. Quét Hàng Loạt", "🛠️ 2. Trạm Vá Lỗi", "📥 3. Xuất Dữ Liệu"])
     
-    col_ai_1, col_ai_2 = st.columns([1, 2])
+    with tab1:
+        input_text = st.text_area("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", height=200)
+        if st.button("🔄 Chạy Excel Tự Động", type="primary"):
+            queries = [q.strip() for q in input_text.split('\n') if q.strip()]
+            st.session_state.app_data_excel = []
+            bar = st.progress(0)
+            for i, q in enumerate(queries):
+                new_addr, note, is_err = auto_convert_address(q)
+                st.session_state.app_data_excel.append({'id': i, 'old': q, 'new': new_addr, 'notes': note, 'is_error': is_err})
+                bar.progress((i + 1) / len(queries))
+            st.rerun()
+            
+        if st.session_state.app_data_excel:
+            errs = sum(1 for d in st.session_state.app_data_excel if d['is_error'])
+            st.success(f"✅ Đã xử lý {len(st.session_state.app_data_excel)} dòng. (Lỗi: {errs} - Xem Tab 2)")
+
+    with tab2:
+        error_items = [d for d in st.session_state.app_data_excel if d['is_error']]
+        if not error_items: st.info("Không có địa chỉ nào bị lỗi!")
+        else:
+            err_dict = {i['id']: i['old'] for i in error_items}
+            sel_id = st.selectbox("Chọn địa chỉ lỗi để sửa:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
+            sel_item = next(i for i in st.session_state.app_data_excel if i['id'] == sel_id)
+            
+            c1, c2, c3 = st.columns(3)
+            tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
+            tinh_sel = c1.selectbox("Tỉnh/Thành", ["-- Chọn --"] + tinh_list)
+            huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
+            if tinh_sel != "-- Chọn --":
+                huyen_sel = c2.selectbox("Quận/Huyện", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()))
+                if huyen_sel != "-- Chọn --":
+                    xa_sel = c3.selectbox("Phường/Xã", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()))
+            
+            if xa_sel != "-- Chọn --":
+                exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
+                sug_addr = force_convert_address(sel_item['old'], exact_row)
+                final_edit = st.text_input("✍️ Chỉnh sửa kết quả:", value=sug_addr)
+                if st.button("💾 Lưu thay đổi", type="primary"):
+                    for d in st.session_state.app_data_excel:
+                        if d['id'] == sel_id:
+                            d.update({'new': final_edit, 'is_error': False, 'notes': "✅ Sửa thủ công"})
+                    st.rerun()
+
+    with tab3:
+        if st.session_state.app_data_excel:
+            df_out = pd.DataFrame(st.session_state.app_data_excel)[['old', 'new', 'notes']].rename(columns={'old': 'Gốc', 'new': 'Mới', 'notes': 'Ghi chú'})
+            st.dataframe(df_out, use_container_width=True)
+            st.download_button("⬇️ Tải Excel Data (CSV)", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Cu_Sang_Moi.csv", mime="text/csv", type="primary")
+
+
+# ------------------------------------------
+# PHÂN HỆ B: AI (MỚI -> CŨ)
+# ------------------------------------------
+elif "B. MỚI" in mode:
+    st.title("🤖 HỆ THỐNG AI: DỊCH NGƯỢC MỚI ➡️ CŨ")
     
-    with col_ai_1:
-        api_key_input = st.text_input("🔑 Nhập Google Gemini API Key:", type="password")
-    
-    # Chỉ khi bạn nhập API Key thì mới hiện tiếp các phần sau
-    if api_key_input:
+    # Khu vực cài đặt API
+    c1, c2 = st.columns([1, 2])
+    api_key = c1.text_input("🔑 Google Gemini API Key:", type="password")
+    selected_model = None
+    if api_key:
         try:
-            genai.configure(api_key=api_key_input)
-            
-            # TỰ ĐỘNG DÒ TÌM MODEL MÀ API KEY HỖ TRỢ
-            available_models = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name.replace("models/", ""))
-            
-            if available_models:
-                with col_ai_2:
-                    selected_model = st.selectbox("🧠 Chọn phiên bản AI (Hệ thống tự nhận diện):", available_models)
-                
-                new_address_input = st.text_input(
-                    "📍 Nhập địa chỉ cần tra cứu:", 
-                    placeholder="K29/2 Nguyễn Như Đãi, Tổ 20, Phường Cẩm Lệ, TP Đà Nẵng"
-                )
-                
-                if st.button("⏪ Yêu cầu AI dịch ngược", type="primary"):
-                    if not new_address_input:
-                        st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
-                    else:
-                      with st.spinner(f"Đang kết nối não bộ {selected_model}..."):
-                            try:
-                                # GỠ BỎ HOÀN TOÀN GIỚI HẠN TỐC ĐỘ / TOKENS ĐỂ AI KHÔNG BỊ ĐỨT ĐOẠN
-                                model = genai.GenerativeModel(selected_model)
-                                
-                                prompt = f"""
-                                Bạn là chuyên gia địa lý Việt Nam. Nhiệm vụ của bạn là sửa lỗi địa chỉ đầu vào và tra ngược về địa chỉ chuẩn.
-                                Địa chỉ đầu vào: "{new_address_input}"
-                                
-                                Yêu cầu BẮT BUỘC:
-                                1. Sửa các lỗi sai cấp hành chính. (Ví dụ: Thủ Đức là Thành phố/Quận, không phải Phường. Đường Kha Vạn Cân phải thuộc phường Linh Chiểu/Linh Tây... thuộc Thủ Đức).
-                                2. TRẢ VỀ ĐẦY ĐỦ VÀ TRỌN VẸN toàn bộ chuỗi địa chỉ các cấp. Tuyệt đối không được bỏ dở giữa chừng.
-                                3. Format chuẩn: [Số nhà/Đường], [Phường/Xã chuẩn], [Quận/Huyện/TP thuộc tỉnh], [Tỉnh/Thành phố trung ương].
-                                4. Xuống dòng ghi "Giải thích:" và giải thích ngắn gọn.
-                                """
-                                
-                                response = model.generate_content(prompt)
-                                st.success("🎉 Kết quả từ AI:")
-                                st.write(response.text)
-                                
-                            except Exception as e:
-                                st.error(f"Lỗi khi chạy model {selected_model}: {e}")
-            else:
-                st.error("API Key của bạn hợp lệ nhưng không được cấp quyền sử dụng bất kỳ model tạo văn bản nào của Google.")
-                
+            genai.configure(api_key=api_key)
+            models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            selected_model = c2.selectbox("🧠 Chọn AI Model:", models, index=models.index('gemini-1.5-flash') if 'gemini-1.5-flash' in models else 0)
         except Exception as e:
-            st.error(f"Lỗi kết nối với API Key: {e}")
+            st.error("API Key không hợp lệ!")
+    
+    tab1, tab2, tab3 = st.tabs(["🚀 1. Quét Hàng Loạt AI", "🚑 2. Trạm Cấp Cứu", "📥 3. Xuất Dữ Liệu"])
+    
+    with tab1:
+        input_text = st.text_area("Nhập danh sách địa chỉ mới sáp nhập/gõ sai (Khuyên dùng: 10-30 dòng/lần):", height=200)
+        if st.button("⏪ Yêu Cầu AI Phân Tích", type="primary"):
+            if not selected_model: st.warning("Vui lòng nhập API Key trước!")
+            elif input_text.strip():
+                queries = [q.strip() for q in input_text.split('\n') if q.strip()]
+                model = genai.GenerativeModel(selected_model)
+                results = process_batch_with_intelligence(model, queries)
+                
+                st.session_state.app_data_ai = []
+                for i, q in enumerate(queries):
+                    res = results.get(q, "LỖI: Không nhận được phản hồi")
+                    is_err = "LỖI:" in res.upper()
+                    st.session_state.app_data_ai.append({'id': i, 'old': q, 'new': res.replace("LỖI:", "").strip() if not is_err else "", 'notes': res if is_err else "AI Xử lý", 'is_error': is_err})
+                st.rerun()
+
+        if st.session_state.app_data_ai:
+            errs = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
+            st.success(f"✅ Đã phân tích {len(st.session_state.app_data_ai)} dòng. (Cần cấp cứu: {errs} - Xem Tab 2)")
+
+    with tab2:
+        error_items = [d for d in st.session_state.app_data_ai if d['is_error']]
+        if not error_items: st.info("🎉 Tuyệt vời! AI đã xử lý thành công toàn bộ, không có ca nào thiếu dữ liệu!")
+        else:
+            st.warning("Các địa chỉ dưới đây quá ngắn hoặc thiếu tên đường, AI không thể suy luận. Vui lòng bổ sung thêm thông tin!")
+            err_dict = {i['id']: i['old'] for i in error_items}
+            sel_id = st.selectbox("Chọn địa chỉ cần cấp cứu:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
+            sel_item = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id)
+            
+            st.write(f"**Lý do lỗi:** {sel_item['notes']}")
+            new_context = st.text_input("Bổ sung thông tin (Tên đường, gần địa danh nào...):", value=sel_item['old'])
+            
+            if st.button("🔄 Cho AI chạy lại ca này", type="primary") and selected_model:
+                with st.spinner("AI đang thử lại..."):
+                    model = genai.GenerativeModel(selected_model)
+                    res = process_batch_with_intelligence(model, [new_context])[new_context]
+                    if "LỖI:" not in res.upper():
+                        for d in st.session_state.app_data_ai:
+                            if d['id'] == sel_id:
+                                d.update({'old': new_context, 'new': res, 'is_error': False, 'notes': "✅ Đã cấp cứu"})
+                        st.rerun()
+                    else:
+                        st.error("Vẫn thiếu thông tin, AI chưa thể giải quyết!")
+
+    with tab3:
+        if st.session_state.app_data_ai:
+            df_out = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Gốc', 'new': 'Kết quả AI', 'notes': 'Ghi chú/Giải thích'})
+            st.dataframe(df_out, use_container_width=True)
+            st.download_button("⬇️ Tải AI Data (CSV)", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Moi_Sang_Cu.csv", mime="text/csv", type="primary")
