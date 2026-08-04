@@ -541,7 +541,7 @@ else:
         if st.button("⏪ Yêu cầu AI dịch ngược & sửa lỗi", type="primary", key="btn_ai"):
             if not selected_model: st.warning("⚠️ Vui lòng nhập API Key hợp lệ ở bảng cấu hình phía trên trước!")
             elif input_text_ai.strip():
-                st.session_state.ai_cache = {}
+                # TUYỆT ĐỐI KHÔNG CLEAR ai_cache Ở ĐÂY NỮA ĐỂ GIỮ LẠI BỘ NHỚ ĐỆM
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 model = genai.GenerativeModel(selected_model)
                 
@@ -618,12 +618,12 @@ else:
                 
                 final_edit_ai = st.text_input("✍️ Chỉnh sửa lần cuối:", key="edit_ai_input")
                 
-                if st.button("💾 Lưu thủ công", type="primary", key="save_ai_fix"):
+                if st.button("💾 Xác nhận lưu địa chỉ CŨ chuẩn này", type="primary", key="save_ai_fix"):
                     for d in st.session_state.app_data_ai:
                         if d['id'] == sel_id_ai:
                             d.update({'new': final_edit_ai, 'confidence': 'Đã sửa tay', 'is_error': False})
                             
-                            # 👇 DÒNG THÊM MỚI: Ép AI học lại và lưu kết quả con người sửa vào bộ nhớ đệm
+                            # GHI ĐÈ VÀO BỘ NHỚ ĐỆM CỦA AI ĐỂ LẦN SAU NÓ NHỚ
                             st.session_state.ai_cache[d['old']] = {"address": final_edit_ai, "confidence": "Đã sửa tay"}
                             
                     if "edit_ai_input" in st.session_state: del st.session_state.edit_ai_input
