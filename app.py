@@ -372,48 +372,64 @@ with tab3:
         st.download_button("⬇️ TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="Ket_Qua_Dia_Chi.csv", mime="text/csv", use_container_width=True, type="primary")
 
 # ==========================================
+# ==========================================
 # 4. TAB 4: TÍCH HỢP AI GEMINI (MỚI -> CŨ)
 # ==========================================
 with tab4:
     st.markdown("### 🤖 Trợ lý AI: Dịch ngược địa chỉ MỚI về CŨ")
-    st.info("Nhập địa chỉ bị gõ sai hoặc địa chỉ mới sáp nhập. AI sẽ kết nối Internet để suy luận ra địa chỉ gốc mà không cần dùng đến file Excel.")
+    st.info("Hệ thống tự động quét các phiên bản AI mà API Key của bạn hỗ trợ để tránh lỗi kết nối.")
     
     col_ai_1, col_ai_2 = st.columns([1, 2])
+    
     with col_ai_1:
-        api_key_input = st.text_input("🔑 Nhập Google Gemini API Key:", type="password", help="Dùng để đánh thức AI")
+        api_key_input = st.text_input("🔑 Nhập Google Gemini API Key:", type="password")
     
-    with col_ai_2:
-        new_address_input = st.text_input(
-            "📍 Nhập địa chỉ cần tra cứu:", 
-            placeholder="K29/2 Nguyễn Như Đãi, Tổ 20, Phường Cẩm Lệ, TP Đà Nẵng"
-        )
-    
-    if st.button("⏪ Yêu cầu AI dịch ngược", type="primary"):
-        if not api_key_input:
-            st.error("Vui lòng nhập API Key!")
-        elif not new_address_input:
-            st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
-        else:
-            with st.spinner("Đang kết nối não bộ AI... (Mất khoảng 3-5 giây)"):
-                try:
-                    genai.configure(api_key=api_key_input)
-                    # Sử dụng model flash siêu tốc độ
-                    model = genai.GenerativeModel('gemini-pro')
-                    
-                    prompt = f"""
-                    Bạn là một chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ của bạn là tra ngược địa chỉ hiện tại về địa chỉ cũ trước đợt sáp nhập gần nhất (hoặc sửa lại cho đúng tên Phường/Quận nếu người dùng gõ sai).
-                    Địa chỉ đầu vào bị lỗi/mới sáp nhập: "{new_address_input}"
-                    
-                    Yêu cầu:
-                    1. Kiểm tra xem tên Phường, Quận trong câu có gõ sai không. (Ví dụ: "Cẩm Lệ" là Quận chứ không phải Phường, đường "Nguyễn Như Đãi" thực tế nằm ở phường nào?).
-                    2. Tìm kiếm thông tin siêu vi mô (nếu có) như Tổ, Khóm để xác định chính xác Phường/Xã cũ.
-                    3. Format kết quả trả về bắt buộc: [Số nhà/Đường], [Phường/Xã CŨ chính xác], [Quận/Huyện CŨ chính xác], [Tỉnh/Thành phố].
-                    4. Viết 1-2 câu giải thích ngắn gọn vì sao bạn suy luận ra kết quả này ở dòng bên dưới.
-                    """
-                    
-                    response = model.generate_content(prompt)
-                    st.success("🎉 Kết quả suy luận từ AI:")
-                    st.write(response.text)
-                    
-                except Exception as e:
-                    st.error(f"Có lỗi xảy ra khi kết nối AI. Vui lòng kiểm tra lại API Key hoặc mạng: {e}")
+    # Chỉ khi bạn nhập API Key thì mới hiện tiếp các phần sau
+    if api_key_input:
+        try:
+            genai.configure(api_key=api_key_input)
+            
+            # TỰ ĐỘNG DÒ TÌM MODEL MÀ API KEY HỖ TRỢ
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name.replace("models/", ""))
+            
+            if available_models:
+                with col_ai_2:
+                    selected_model = st.selectbox("🧠 Chọn phiên bản AI (Hệ thống tự nhận diện):", available_models)
+                
+                new_address_input = st.text_input(
+                    "📍 Nhập địa chỉ cần tra cứu:", 
+                    placeholder="K29/2 Nguyễn Như Đãi, Tổ 20, Phường Cẩm Lệ, TP Đà Nẵng"
+                )
+                
+                if st.button("⏪ Yêu cầu AI dịch ngược", type="primary"):
+                    if not new_address_input:
+                        st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
+                    else:
+                        with st.spinner(f"Đang kết nối não bộ {selected_model}..."):
+                            try:
+                                model = genai.GenerativeModel(selected_model)
+                                prompt = f"""
+                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ: tra ngược địa chỉ hiện tại về địa chỉ cũ trước đợt sáp nhập gần nhất (hoặc sửa lỗi nếu người dùng gõ sai Phường/Quận).
+                                Địa chỉ đầu vào: "{new_address_input}"
+                                
+                                Yêu cầu:
+                                1. Sửa lỗi sai hành chính (Ví dụ: Cẩm Lệ là Quận, không phải Phường. Nguyễn Như Đãi thuộc phường nào?).
+                                2. Tìm thông tin vi mô (Tổ, Khóm) để xác định Phường/Xã cũ.
+                                3. Trả về đúng format: [Số nhà/Đường], [Phường/Xã CŨ], [Quận/Huyện CŨ], [Tỉnh/Thành phố].
+                                4. Viết 1 dòng giải thích lý do ngắn gọn.
+                                """
+                                
+                                response = model.generate_content(prompt)
+                                st.success("🎉 Kết quả suy luận từ AI:")
+                                st.write(response.text)
+                                
+                            except Exception as e:
+                                st.error(f"Lỗi khi chạy model {selected_model}: {e}")
+            else:
+                st.error("API Key của bạn hợp lệ nhưng không được cấp quyền sử dụng bất kỳ model tạo văn bản nào của Google.")
+                
+        except Exception as e:
+            st.error(f"Lỗi kết nối với API Key: {e}")
