@@ -357,11 +357,21 @@ else:
                 model = genai.GenerativeModel(selected_model)
                 results = process_batch_with_intelligence(model, queries)
                 
-                st.session_state.app_data_ai = []
+              st.session_state.app_data_ai = []
                 for i, q in enumerate(queries):
                     res = results.get(q, "LỖI: Không nhận được phản hồi")
                     is_err = "LỖI:" in res.upper()
-                    st.session_state.app_data_ai.append({'id': i, 'old': q, 'new': res.replace("LỖI:", "").strip() if not is_err else "", 'notes': res if is_err else "AI Xử lý thành công", 'is_error': is_err})
+                    
+                    # Cắt đôi chuỗi tại dấu "|" để tách Kết quả và Ghi chú
+                    if is_err:
+                        final_new = ""
+                        final_note = res
+                    else:
+                        parts = res.split("|", 1) # Cắt tối đa 1 lần
+                        final_new = parts[0].strip()
+                        final_note = parts[1].strip() if len(parts) > 1 else "AI Xử lý thành công"
+                        
+                    st.session_state.app_data_ai.append({'id': i, 'old': q, 'new': final_new, 'notes': final_note, 'is_error': is_err})
                 st.rerun()
 
         if st.session_state.app_data_ai:
