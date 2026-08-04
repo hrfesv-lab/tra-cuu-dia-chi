@@ -7,7 +7,7 @@ import time
 import json
 
 # ==========================================
-# 1. CÀI ĐẶT TRANG & CSS GIAO DIỆN
+# 1. CÀI ĐẶT TRANG & CSS GIAO DIỆN HÀNG NGANG
 # ==========================================
 st.set_page_config(page_title="Chuyển đổi Địa chỉ ĐVHC", page_icon="📍", layout="wide")
 
@@ -15,14 +15,21 @@ hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+            
+            /* Tối ưu các Tab cấp 1 (Tab lớn ở trên) */
+            .stTabs [data-baseweb="tab-list"] { gap: 10px; }
             .stTabs [data-baseweb="tab"] {
-                height: 50px; white-space: pre-wrap; background-color: #f0f2f6;
-                border-radius: 4px 4px 0px 0px; gap: 1px; padding: 10px 20px;
+                height: 55px; 
+                white-space: pre-wrap; 
+                background-color: #f0f2f6;
+                border-radius: 8px 8px 0px 0px; 
+                padding: 10px 25px;
+                font-weight: bold;
+                font-size: 16px;
             }
             .stTabs [aria-selected="true"] {
-                background-color: #ffffff; border-bottom: 2px solid #ff4b4b;
-                color: #ff4b4b; font-weight: bold;
+                background-color: #ff4b4b !important;
+                color: #ffffff !important;
             }
             </style>
             """
@@ -61,7 +68,7 @@ def load_data():
         df['xa_core_lower'] = df['xa_core'].str.lower()
         df['huyen_core_lower'] = df['huyen_core'].str.lower()
         return df, df.to_dict('records')
-    except Exception as e:
+    except Exception:
         return pd.DataFrame(), []
 
 df, db_records = load_data()
@@ -85,9 +92,7 @@ def normalize_for_search(query):
     return query
 
 def get_match_score(full_name, core_name, query, prefix_man):
-    query = query.lower()
-    core_name = core_name.lower()
-    full_name = full_name.lower()
+    query, core_name, full_name = query.lower(), core_name.lower(), full_name.lower()
     if re.search(r'(?i)\b' + re.escape(full_name) + r'(?!\w)', query): return 4
     if re.search(r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)', query): return 3
     if re.search(r'(?i)(?:^|,\s*)' + re.escape(core_name) + r'\s*(?=$|,)', query): return 2
@@ -107,8 +112,7 @@ def remove_part_smart(query, full_name, core_name, prefix_opt, prefix_man):
     return query
 
 def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix_man):
-    for pattern in [r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)', 
-                    r'(?i)(^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)']:
+    for pattern in [r'(?i)(^|,\s*)' + re.escape(full_name) + r'\s*(?=$|,)', r'(?i)(^|,\s*)' + prefix_opt + re.escape(core_name) + r'\s*(?=$|,)']:
         out, count = re.subn(pattern, lambda m: f"{m.group(1)}{new_name}", query, count=1)
         if count > 0: return out
     for pattern in [r'(?i)\b' + re.escape(full_name) + r'(?!\w)', r'(?i)\b' + prefix_man + re.escape(core_name) + r'(?!\w)']:
@@ -180,13 +184,12 @@ def force_convert_address(query, row):
 
 
 # ==========================================
-# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - COMBO 3 TRONG 1
+# 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
     uncached_addresses = []
     
-    # 1. Trích xuất từ Cache
     for addr in address_list:
         if addr in st.session_state.ai_cache:
             all_results[addr] = st.session_state.ai_cache[addr]
@@ -195,9 +198,8 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
             
     if not uncached_addresses: return all_results
     
-    # 2. Gom nhóm Batch
     batches = [uncached_addresses[i:i + batch_size] for i in range(0, len(uncached_addresses), batch_size)]
-    progress_bar = st.progress(0, text="Đang xử lý AI...")
+    progress_bar = st.progress(0, text="Đang kết nối AI...")
     
     for idx, batch in enumerate(batches):
         prompt = f"""
@@ -212,7 +214,6 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
         - Format value chuẩn: "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố] | Giải thích".
         """
         
-        # 3. Ngủ đông & Thử lại (Backoff)
         max_retries, delay = 3, 2
         for attempt in range(max_retries):
             try:
@@ -231,32 +232,34 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
                 else:
                     for addr in batch: all_results[addr] = f"LỖI: Lỗi API sau {max_retries} lần thử."
                     
-        time.sleep(1) # Chống spam API
-        progress_bar.progress((idx + 1) / len(batches), text=f"Đang xử lý {idx + 1}/{len(batches)} gói...")
+        time.sleep(1)
+        progress_bar.progress((idx + 1) / len(batches), text=f"Đang xử lý gói {idx + 1}/{len(batches)}...")
         
     progress_bar.empty()
     return all_results
 
 
 # ==========================================
-# 4. GIAO DIỆN CHÍNH (SIDEBAR + TABS)
+# 4. GIAO DIỆN CHÍNH (TAB LỒNG TAB HÀNG NGANG)
 # ==========================================
-st.sidebar.title("📍 BẢNG ĐIỀU KHIỂN")
-mode = st.sidebar.radio("Chọn hướng xử lý:", [
-    "🚀 A. CŨ ➡️ MỚI (Dùng Excel)", 
-    "🤖 B. MỚI ➡️ CŨ (Dùng AI)"
+st.title("📍 CÔNG CỤ CHUYỂN ĐỔI ĐỊA CHỈ HÀNH CHÍNH")
+
+# PHÂN HỆ CẤP 1: TABS HÀNG NGANG TRÊN CÙNG
+main_tab1, main_tab2 = st.tabs([
+    "🚀 PHÂN HỆ 1: CŨ ➡️ MỚI (Excel)", 
+    "🤖 PHÂN HỆ 2: MỚI ➡️ CŨ (AI)"
 ])
 
 # ------------------------------------------
-# PHÂN HỆ A: EXCEL (CŨ -> MỚI)
+# PHÂN HỆ 1: CHUYỂN CŨ -> MỚI
 # ------------------------------------------
-if "A. CŨ" in mode:
-    st.title("🚀 HỆ THỐNG: CHUYỂN CŨ ➡️ MỚI")
-    tab1, tab2, tab3 = st.tabs(["📋 1. Quét Hàng Loạt", "🛠️ 2. Trạm Vá Lỗi", "📥 3. Xuất Dữ Liệu"])
+with main_tab1:
+    # PHÂN HỆ CẤP 2: 3 TABS NHỎ BÊN TRONG
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🚀 1. Quét Hàng Loạt", "🛠️ 2. Trạm Vá Lỗi", "📥 3. Xuất Dữ Liệu"])
     
-    with tab1:
-        input_text = st.text_area("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", height=200)
-        if st.button("🔄 Chạy Excel Tự Động", type="primary"):
+    with sub_tab1:
+        input_text = st.text_area("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", height=180, key="excel_input")
+        if st.button("🔄 Chạy Excel Tự Động", type="primary", key="btn_excel"):
             queries = [q.strip() for q in input_text.split('\n') if q.strip()]
             st.session_state.app_data_excel = []
             bar = st.progress(0)
@@ -268,68 +271,67 @@ if "A. CŨ" in mode:
             
         if st.session_state.app_data_excel:
             errs = sum(1 for d in st.session_state.app_data_excel if d['is_error'])
-            st.success(f"✅ Đã xử lý {len(st.session_state.app_data_excel)} dòng. (Lỗi: {errs} - Xem Tab 2)")
+            st.success(f"✅ Đã xử lý {len(st.session_state.app_data_excel)} dòng. (Cần vá lỗi: {errs} - Sang Tab '2. Trạm Vá Lỗi')")
 
-    with tab2:
+    with sub_tab2:
         error_items = [d for d in st.session_state.app_data_excel if d['is_error']]
         if not error_items: st.info("Không có địa chỉ nào bị lỗi!")
         else:
             err_dict = {i['id']: i['old'] for i in error_items}
-            sel_id = st.selectbox("Chọn địa chỉ lỗi để sửa:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
+            sel_id = st.selectbox("Chọn địa chỉ lỗi để sửa:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x], key="excel_err_select")
             sel_item = next(i for i in st.session_state.app_data_excel if i['id'] == sel_id)
             
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
-            tinh_sel = c1.selectbox("Tỉnh/Thành", ["-- Chọn --"] + tinh_list)
+            tinh_sel = c1.selectbox("Tỉnh/Thành", ["-- Chọn --"] + tinh_list, key="tinh_sel")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
-                huyen_sel = c2.selectbox("Quận/Huyện", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()))
+                huyen_sel = c2.selectbox("Quận/Huyện", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel")
                 if huyen_sel != "-- Chọn --":
-                    xa_sel = c3.selectbox("Phường/Xã", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()))
+                    xa_sel = c3.selectbox("Phường/Xã", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()), key="xa_sel")
             
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
                 sug_addr = force_convert_address(sel_item['old'], exact_row)
-                final_edit = st.text_input("✍️ Chỉnh sửa kết quả:", value=sug_addr)
-                if st.button("💾 Lưu thay đổi", type="primary"):
+                final_edit = st.text_input("✍️ Chỉnh sửa kết quả:", value=sug_addr, key="edit_excel_input")
+                if st.button("💾 Lưu thay đổi", type="primary", key="save_excel"):
                     for d in st.session_state.app_data_excel:
                         if d['id'] == sel_id:
                             d.update({'new': final_edit, 'is_error': False, 'notes': "✅ Sửa thủ công"})
                     st.rerun()
 
-    with tab3:
+    with sub_tab3:
         if st.session_state.app_data_excel:
             df_out = pd.DataFrame(st.session_state.app_data_excel)[['old', 'new', 'notes']].rename(columns={'old': 'Gốc', 'new': 'Mới', 'notes': 'Ghi chú'})
             st.dataframe(df_out, use_container_width=True)
-            st.download_button("⬇️ Tải Excel Data (CSV)", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Cu_Sang_Moi.csv", mime="text/csv", type="primary")
+            st.download_button("⬇️ Tải File Kết Quả (CSV)", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Cu_Sang_Moi.csv", mime="text/csv", type="primary", key="dl_excel")
 
 
 # ------------------------------------------
-# PHÂN HỆ B: AI (MỚI -> CŨ)
+# PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (AI)
 # ------------------------------------------
-elif "B. MỚI" in mode:
-    st.title("🤖 HỆ THỐNG AI: DỊCH NGƯỢC MỚI ➡️ CŨ")
-    
-    # Khu vực cài đặt API
+with main_tab2:
+    # Cấu hình API trong Phân hệ AI
     c1, c2 = st.columns([1, 2])
-    api_key = c1.text_input("🔑 Google Gemini API Key:", type="password")
+    api_key = c1.text_input("🔑 Google Gemini API Key:", type="password", key="ai_key_input")
     selected_model = None
     if api_key:
         try:
             genai.configure(api_key=api_key)
             models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            selected_model = c2.selectbox("🧠 Chọn AI Model:", models, index=models.index('gemini-1.5-flash') if 'gemini-1.5-flash' in models else 0)
-        except Exception as e:
+            selected_model = c2.selectbox("🧠 Chọn AI Model:", models, index=models.index('gemini-1.5-flash') if 'gemini-1.5-flash' in models else 0, key="ai_model_select")
+        except Exception:
             st.error("API Key không hợp lệ!")
+
+    # PHÂN HỆ CẤP 2: 3 TABS NHỎ BÊN TRONG
+    sub_ai_tab1, sub_ai_tab2, sub_ai_tab3 = st.tabs(["🤖 1. Quét Hàng Loạt AI", "🚑 2. Trạm Cấp Cứu", "📥 3. Xuất Dữ Liệu"])
     
-    tab1, tab2, tab3 = st.tabs(["🚀 1. Quét Hàng Loạt AI", "🚑 2. Trạm Cấp Cứu", "📥 3. Xuất Dữ Liệu"])
-    
-    with tab1:
-        input_text = st.text_area("Nhập danh sách địa chỉ mới sáp nhập/gõ sai (Khuyên dùng: 10-30 dòng/lần):", height=200)
-        if st.button("⏪ Yêu Cầu AI Phân Tích", type="primary"):
-            if not selected_model: st.warning("Vui lòng nhập API Key trước!")
-            elif input_text.strip():
-                queries = [q.strip() for q in input_text.split('\n') if q.strip()]
+    with sub_ai_tab1:
+        input_text_ai = st.text_area("Nhập danh sách địa chỉ mới (mỗi địa chỉ 1 dòng):", height=180, key="ai_input")
+        if st.button("⏪ Yêu Cầu AI Phân Tích", type="primary", key="btn_ai"):
+            if not selected_model: st.warning("Vui lòng nhập API Key hợp lệ phía trên!")
+            elif input_text_ai.strip():
+                queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 model = genai.GenerativeModel(selected_model)
                 results = process_batch_with_intelligence(model, queries)
                 
@@ -342,34 +344,34 @@ elif "B. MỚI" in mode:
 
         if st.session_state.app_data_ai:
             errs = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
-            st.success(f"✅ Đã phân tích {len(st.session_state.app_data_ai)} dòng. (Cần cấp cứu: {errs} - Xem Tab 2)")
+            st.success(f"✅ Đã phân tích {len(st.session_state.app_data_ai)} dòng. (Cần bổ sung: {errs} - Sang Tab '2. Trạm Cấp Cứu')")
 
-    with tab2:
-        error_items = [d for d in st.session_state.app_data_ai if d['is_error']]
-        if not error_items: st.info("🎉 Tuyệt vời! AI đã xử lý thành công toàn bộ, không có ca nào thiếu dữ liệu!")
+    with sub_ai_tab2:
+        error_items_ai = [d for d in st.session_state.app_data_ai if d['is_error']]
+        if not error_items_ai: st.info("🎉 Không có địa chỉ nào bị thiếu dữ liệu!")
         else:
-            st.warning("Các địa chỉ dưới đây quá ngắn hoặc thiếu tên đường, AI không thể suy luận. Vui lòng bổ sung thêm thông tin!")
-            err_dict = {i['id']: i['old'] for i in error_items}
-            sel_id = st.selectbox("Chọn địa chỉ cần cấp cứu:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
-            sel_item = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id)
+            st.warning("Các địa chỉ dưới đây thiếu thông tin (như tên đường/phường), vui lòng bổ sung thêm!")
+            err_dict_ai = {i['id']: i['old'] for i in error_items_ai}
+            sel_id_ai = st.selectbox("Chọn địa chỉ cần bổ sung:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
+            sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
             
-            st.write(f"**Lý do lỗi:** {sel_item['notes']}")
-            new_context = st.text_input("Bổ sung thông tin (Tên đường, gần địa danh nào...):", value=sel_item['old'])
+            st.write(f"**Lý do lỗi:** {sel_item_ai['notes']}")
+            new_context = st.text_input("Bổ sung thông tin (Thêm tên đường, địa danh...):", value=sel_item_ai['old'], key="fix_ai_input")
             
-            if st.button("🔄 Cho AI chạy lại ca này", type="primary") and selected_model:
+            if st.button("🔄 Cho AI chạy lại ca này", type="primary", key="retry_ai") and selected_model:
                 with st.spinner("AI đang thử lại..."):
                     model = genai.GenerativeModel(selected_model)
                     res = process_batch_with_intelligence(model, [new_context])[new_context]
                     if "LỖI:" not in res.upper():
                         for d in st.session_state.app_data_ai:
-                            if d['id'] == sel_id:
+                            if d['id'] == sel_id_ai:
                                 d.update({'old': new_context, 'new': res, 'is_error': False, 'notes': "✅ Đã cấp cứu"})
                         st.rerun()
                     else:
-                        st.error("Vẫn thiếu thông tin, AI chưa thể giải quyết!")
+                        st.error("Vẫn thiếu thông tin, AI chưa thể tra được!")
 
-    with tab3:
+    with sub_ai_tab3:
         if st.session_state.app_data_ai:
-            df_out = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Gốc', 'new': 'Kết quả AI', 'notes': 'Ghi chú/Giải thích'})
-            st.dataframe(df_out, use_container_width=True)
-            st.download_button("⬇️ Tải AI Data (CSV)", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Moi_Sang_Cu.csv", mime="text/csv", type="primary")
+            df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Gốc', 'new': 'Kết quả AI', 'notes': 'Ghi chú/Giải thích'})
+            st.dataframe(df_out_ai, use_container_width=True)
+            st.download_button("⬇️ Tải AI Data (CSV)", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_Moi_Sang_Cu.csv", mime="text/csv", type="primary", key="dl_ai")
