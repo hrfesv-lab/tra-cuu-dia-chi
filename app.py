@@ -412,14 +412,17 @@ with tab4:
                             try:
                                 model = genai.GenerativeModel(selected_model)
                                 prompt = f"""
-                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ: tra ngược địa chỉ hiện tại về địa chỉ cũ trước đợt sáp nhập gần nhất (hoặc sửa lỗi nếu người dùng gõ sai Phường/Quận).
+                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. 
+                                Nhiệm vụ: Sửa lỗi địa chỉ đầu vào và tra ngược về địa chỉ cũ NGAY TRƯỚC đợt sáp nhập hành chính giai đoạn 2023-2025. 
+                                TUYỆT ĐỐI KHÔNG lùi về các mốc lịch sử quá xa (như năm 2005, 1997...).
+
                                 Địa chỉ đầu vào: "{new_address_input}"
                                 
-                                Yêu cầu:
-                                1. Sửa lỗi sai hành chính (Ví dụ: Cẩm Lệ là Quận, không phải Phường. Nguyễn Như Đãi thuộc phường nào?).
-                                2. Tìm thông tin vi mô (Tổ, Khóm) để xác định Phường/Xã cũ.
-                                3. Trả về đúng format: [Số nhà/Đường], [Phường/Xã CŨ], [Quận/Huyện CŨ], [Tỉnh/Thành phố].
-                                4. Viết 1 dòng giải thích lý do ngắn gọn.
+                                Yêu cầu bắt buộc:
+                                1. Sửa lỗi sai hành chính hiện tại trước: (Ví dụ: Cẩm Lệ là Quận, không phải Phường. Đường Nguyễn Như Đãi và Tổ 20 thực tế nằm ở Phường nào thuộc Quận Cẩm Lệ hiện nay?).
+                                2. Khung thời gian: Chỉ xét sáp nhập giai đoạn 2024-2025. Nếu địa bàn đó không bị sáp nhập trong đợt này, hãy trả về kết quả đúng của hiện tại.
+                                3. Format trả về ngắn gọn: [Số nhà/Đường], [Phường/Xã (phiên bản trước 2025)], [Quận/Huyện], [Tỉnh/Thành phố].
+                                4. Viết 1 dòng giải thích: Nêu rõ lỗi gõ sai đã sửa (nếu có) và tình trạng sáp nhập (nếu có).
                                 """
                                 
                                 response = model.generate_content(prompt)
