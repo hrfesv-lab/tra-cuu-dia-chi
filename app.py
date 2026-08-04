@@ -19,6 +19,13 @@ hide_st_style = """
     .stTextArea textarea, .stTextInput input, .stSelectbox div[data-baseweb="select"] {
         border-radius: 10px !important;
     }
+    .ref-box {
+        background-color: #e7f5ff;
+        border-left: 4px solid #1c7ed6;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
     </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -384,48 +391,51 @@ else:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
             st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
-    # TRẠM CẤP CỨU AI: FIX LOGIC CHO CHỌN TỈNH/HUYỆN/XÃ MỚI CHUẨN ĐỂ TRA RA ĐỊA CHỈ CŨ
+    # TRẠM CẤP CỨU AI: CÓ BẢNG THAM CHIẾU TRA CỨU ĐỊA CHỈ MỚI -> XÃ CỦ TƯƠNG ỨNG
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
         if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
         else:
-            st.warning("Các địa chỉ dưới đây bị nghi ngờ hoặc gõ sai. Vui lòng chọn Tỉnh/Huyện/Xã MỚI chuẩn để hệ thống tra ngược lại Địa chỉ CŨ tương ứng!")
-            err_dict_ai = {i['id']: f"{i['old']} ➡️ [Dự đoán AI: {i['new']}]" for i in suspect_items}
+            st.warning("Các địa chỉ dưới đây bị nghi ngờ hoặc gõ sai. Bạn có thể chọn địa bàn MỚI chuẩn để xem Bảng tham chiếu các Xã CŨ tương ứng!")
+            err_dict_ai = {i['id']: f"{i['old']} ➡️ [AI đoán: {i['new']}]" for i in suspect_items}
             sel_id_ai = st.selectbox("Chọn địa chỉ cần cấp cứu/xác nhận:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
             sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
             
-            c1, c2, c3 = st.columns(3)
-            # NẠP DANH SÁCH TỈNH MỚI CHUẨN
+            c1, c2 = st.columns(2)
             tinh_list_new = sorted(df['Tỉnh mới'].dropna().unique().tolist())
-            tinh_sel_new = c1.selectbox("Tỉnh/Thành MỚI chuẩn", ["-- Chọn --"] + tinh_list_new, key="tinh_sel_new")
-            huyen_sel_new, xa_sel_new = "-- Chọn --", "-- Chọn --"
+            tinh_sel_new = c1.selectbox("1. Chọn Tỉnh/Thành MỚI chuẩn", ["-- Chọn --"] + tinh_list_new, key="tinh_sel_new")
             
+            xa_sel_new = "-- Chọn --"
             if tinh_sel_new != "-- Chọn --":
-                # NẠP QUẬN/HUYỆN CHUẨN CỦA TỈNH MỚI ĐÓ (TỪ DATABASE)
                 df_tinh = df[df['Tỉnh mới'] == tinh_sel_new]
-                huyen_sel_new = c2.selectbox("Quận/Huyện cũ tương ứng", ["-- Chọn --"] + sorted(df_tinh['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel_new")
-                
-                if huyen_sel_new != "-- Chọn --":
-                    # NẠP XÃ MỚI CHUẨN
-                    df_huyen = df_tinh[df_tinh['Huyện cũ'] == huyen_sel_new]
-                    xa_sel_new = c3.selectbox("Phường/Xã MỚI chuẩn", ["-- Chọn --"] + sorted(df_huyen['Tên Xã mới'].dropna().unique().tolist()), key="xa_sel_new")
+                xa_sel_new = c2.selectbox("2. Chọn Phường/Xã MỚI chuẩn", ["-- Chọn --"] + sorted(df_tinh['Tên Xã mới'].dropna().unique().tolist()), key="xa_sel_new")
             
+            # HIỆN BẢNG THAM CHIẾU CHI TIẾT
             if xa_sel_new != "-- Chọn --":
-                # LẤY HÀNG DỮ LIỆU TƯƠNG ỨNG TRONG DATABASE
-                exact_row_ai = df[(df['Tỉnh mới'] == tinh_sel_new) & (df['Huyện cũ'] == huyen_sel_new) & (df['Tên Xã mới'] == xa_sel_new)].iloc[0]
+                matched_rows = df[(df['Tỉnh mới'] == tinh_sel_new) & (df['Tên Xã mới'] == xa_sel_new)]
                 
-                # TRÍCH XUẤT PHẦN ĐẦU (SỐ NHÀ/ĐƯỜNG) TỪ ĐỊA CHỈ ĐẦU VÀO
+                # Bảng hiển thị thông tin tham chiếu
+                st.markdown(f"""
+                <div class="ref-box">
+                    💡 <b>BẢNG THAM CHIẾU ĐỊA GIỚI:</b><br>
+                    Địa bàn <b>{xa_sel_new} ({tinh_sel_new})</b> được hợp nhất/sáp nhập từ <b>{len(matched_rows)}</b> đơn vị cũ dưới đây:
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Hiển thị dataframe thu nhỏ làm bằng chứng tra cứu
+                st.dataframe(matched_rows[['Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].reset_index(drop=True), use_container_width=True)
+                
+                # NẠP DROPDOWN ĐỊA CHỈ CỦ ĐỂ NGƯỜI DÙNG CHỌN
+                old_options = [f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}" for _, row in matched_rows.iterrows()]
+                selected_old_unit = st.selectbox("3. Chọn Đơn vị CŨ gốc chính xác cho địa chỉ này:", options=old_options, key="old_unit_select")
+                
+                # TRÍCH XUẤT TÊN ĐƯỜNG/SỐ NHÀ BAN ĐẦU
                 input_addr = sel_item_ai['old']
                 parts = [p.strip() for p in input_addr.split(',') if p.strip()]
                 prefix_street = parts[0] if parts else ""
                 
-                # TẠO ĐỊA CHỈ CŨ HOÀN CHỈNH: [Đường] + [Xã cũ] + [Huyện cũ] + [Tỉnh cũ]
-                old_xa = exact_row_ai['Tên Xã cũ']
-                old_huyen = exact_row_ai['Huyện cũ']
-                old_tinh = exact_row_ai['Tỉnh cũ']
-                
-                sug_addr_old = f"{prefix_street}, {old_xa}, {old_huyen}, {old_tinh}"
-                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn sau khi khớp nối database:", value=sug_addr_old, key="edit_ai_input")
+                sug_addr_old = f"{prefix_street}, {selected_old_unit}"
+                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn hoàn chỉnh sau khi ghép:", value=sug_addr_old, key="edit_ai_input")
                 
                 if st.button("💾 Xác nhận lưu địa chỉ CŨ chuẩn này", type="primary", key="save_ai_fix"):
                     for d in st.session_state.app_data_ai:
