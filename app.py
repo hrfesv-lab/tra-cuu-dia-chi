@@ -5,109 +5,24 @@ import unicodedata
 import google.generativeai as genai
 import time
 import json
+from streamlit_option_menu import option_menu
 
 # ==========================================
-# 1. CÀI ĐẶT TRANG & CSS GIAO DIỆN CAO CẤP (MODERN UI/UX)
+# 1. CÀI ĐẶT TRANG
 # ==========================================
 st.set_page_config(page_title="Công cụ Chuyển đổi Địa chỉ", page_icon="📍", layout="wide")
 
-modern_ui_css = """
-<style>
-    /* Bọc toàn bộ trang vào nền xám Pastel dịu mắt */
-    .stApp {
-        background-color: #f8f9fa;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-
+hide_st_style = """
+    <style>
     #MainMenu, footer, header {visibility: hidden;}
-
-    /* Tiêu đề ứng dụng */
-    .main-title {
-        font-size: 28px;
-        font-weight: 800;
-        color: #1e293b;
-        margin-bottom: 4px;
+    .block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
+    /* Tùy chỉnh ô nhập liệu bo góc đẹp */
+    .stTextArea textarea, .stTextInput input, .stSelectbox div[data-baseweb="select"] {
+        border-radius: 10px !important;
     }
-    .sub-title {
-        font-size: 14px;
-        color: #64748b;
-        margin-bottom: 20px;
-    }
-
-    /* ĐỊNH DẠNG TABS CẤP 1 & CẤP 2 THÀNH "VIÊN THUỐC" (PILL STYLE) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px !important;
-        background-color: #e2e8f0 !important;
-        padding: 6px !important;
-        border-radius: 9999px !important; /* Bo tròn hoàn toàn dạng viên thuốc */
-        border-bottom: none !important;
-        display: inline-flex !important;
-        margin-bottom: 16px !important;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        height: 40px !important;
-        background-color: transparent !important;
-        border-radius: 9999px !important;
-        padding: 8px 24px !important;
-        font-weight: 600 !important;
-        font-size: 14px !important;
-        color: #475569 !important;
-        border: none !important;
-        transition: all 0.25s ease-in-out !important;
-    }
-
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #2563eb !important;
-        background-color: rgba(255, 255, 255, 0.6) !important;
-    }
-
-    /* KHI TAB ĐƯỢC CHỌN (Nổi hẳn lên, đổ bóng, chữ xanh) */
-    .stTabs [aria-selected="true"] {
-        background-color: #ffffff !important;
-        color: #2563eb !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
-    }
-
-    /* Bỏ gạch đỏ mặc định của Streamlit */
-    .stTabs [data-baseweb="tab-highlight-title"], 
-    .stTabs [data-baseweb="tab-border"] {
-        display: none !important;
-    }
-
-    /* KHUNG THẺ (CARD CONTAINER) TẠO CẢM GIÁC SẠCH SẼ, HIỆN ĐẠI */
-    div[data-testid="stForm"], .css-card {
-        background-color: #ffffff;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 10px 15px -3px rgba(0,0,0,0.03);
-        border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
-    }
-
-    /* NÚT BẤM (BUTTON) NỔI BẬT BO TRÒN */
-    .stButton > button {
-        border-radius: 12px !important;
-        font-weight: 600 !important;
-        padding: 10px 24px !important;
-        transition: all 0.2s ease !important;
-        border: none !important;
-    }
-
-    /* Ô NHẬP LIỆU (TEXTAREA & INPUT) BO GÓC MỀM MẠI */
-    .stTextArea textarea, .stTextInput input, .stSelectbox select {
-        border-radius: 12px !important;
-        border: 1px solid #cbd5e1 !important;
-        padding: 12px !important;
-    }
-    
-    .stTextArea textarea:focus, .stTextInput input:focus {
-        border-color: #2563eb !important;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-    }
-</style>
+    </style>
 """
-st.markdown(modern_ui_css, unsafe_allow_html=True)
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # Khởi tạo Session State
 if 'app_data_excel' not in st.session_state: st.session_state.app_data_excel = []
@@ -256,7 +171,6 @@ def force_convert_address(query, row):
     
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
-
 # ==========================================
 # 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
 # ==========================================
@@ -312,33 +226,52 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     progress_bar.empty()
     return all_results
 
-
 # ==========================================
-# 4. GIAO DIỆN CHÍNH (XÂY DỰNG GIAO DIỆN HIỆN ĐẠI)
+# 4. GIAO DIỆN CHÍNH (OPTION MENU DẠNG VIÊN THUỐC ĐẸP MẮT)
 # ==========================================
-st.markdown('<div class="main-title">📍 Công cụ Chuyển đổi Địa chỉ Hành chính</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Hệ thống thông minh tự động gỡ bỏ các tiền tố ĐVHC khi sáp nhập & Tra ngược dữ liệu AI</div>', unsafe_allow_html=True)
+st.markdown("### 📍 Công cụ Chuyển đổi Địa chỉ Hành chính")
 
-# TABS CẤP 1: TẠO KHUNG TABS VIÊN THUỐC
-main_tab1, main_tab2 = st.tabs([
-    "🚀 Chuyển CŨ ➡️ MỚI (Excel)", 
-    "🤖 Chuyển MỚI ➡️ CŨ (Trợ lý AI)"
-])
+# MENU CẤP 1: TẠO KHUNG ĐIỀU HƯỚNG DẠNG VIÊN THUỐC SANG TRỌNG
+main_mode = option_menu(
+    menu_title=None,
+    options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI)"],
+    icons=["rocket-takeoff", "robot"],
+    orientation="horizontal",
+    styles={
+        "container": {"padding": "4px", "background-color": "#f1f3f5", "border-radius": "12px", "margin-bottom": "15px"},
+        "icon": {"color": "#495057", "font-size": "15px"},
+        "nav-link": {
+            "font-size": "14px", "font-weight": "600", "color": "#495057", 
+            "border-radius": "8px", "padding": "8px 20px", "margin": "0px 4px",
+            "--hover-color": "#e9ecef"
+        },
+        "nav-link-selected": {
+            "background-color": "#ffffff", "color": "#0d6efd", "font-weight": "700",
+            "box-shadow": "0px 2px 6px rgba(0,0,0,0.08)"
+        },
+    }
+)
 
 # ------------------------------------------
 # PHÂN HỆ 1: CHUYỂN CŨ -> MỚI
 # ------------------------------------------
-with main_tab1:
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
-        "📤 Chuyển đổi hàng loạt", 
-        "🛠️ Trạm vá lỗi dữ liệu", 
-        "📥 Trạm xuất dữ liệu"
-    ])
-    
-    with sub_tab1:
-        st.write("")
+if "CŨ ➡️ MỚI" in main_mode:
+    sub_mode_excel = option_menu(
+        menu_title=None,
+        options=["Chuyển đổi hàng loạt", "Trạm vá lỗi dữ liệu", "Trạm xuất dữ liệu"],
+        icons=["cloud-upload", "wrench", "download"],
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"},
+            "icon": {"font-size": "13px"},
+            "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"},
+            "nav-link-selected": {"background-color": "#ffffff", "color": "#198754", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"},
+        }
+    )
+
+    if sub_mode_excel == "Chuyển đổi hàng loạt":
         input_text = st.text_area("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", height=180, key="excel_input", placeholder="Ví dụ:\nPhường 1, Quận 3, TP HCM\nXã Tân Bình, Huyện Châu Thành, Tỉnh Đồng Tháp...")
-        if st.button("⚡ Bắt đầu chuyển đổi ngay", type="primary", key="btn_excel"):
+        if st.button("⚡ Bắt đầu chuyển đổi Excel", type="primary", key="btn_excel"):
             queries = [q.strip() for q in input_text.split('\n') if q.strip()]
             st.session_state.app_data_excel = []
             bar = st.progress(0)
@@ -350,16 +283,14 @@ with main_tab1:
             
         if st.session_state.app_data_excel:
             errs = sum(1 for d in st.session_state.app_data_excel if d['is_error'])
-            st.success(f"🎉 Hoàn tất! Đã xử lý {len(st.session_state.app_data_excel)} dòng. (Có {errs} dòng cần xử lý ➡️ Chuyển sang tab 'Trạm vá lỗi dữ liệu')")
+            st.success(f"🎉 Hoàn tất {len(st.session_state.app_data_excel)} dòng. (Có {errs} dòng bị lỗi ➡️ Chọn tab 'Trạm vá lỗi dữ liệu' phía trên để sửa)")
 
-    with sub_tab2:
-        st.write("")
+    elif sub_mode_excel == "Trạm vá lỗi dữ liệu":
         error_items = [d for d in st.session_state.app_data_excel if d['is_error']]
-        if not error_items: 
-            st.info("🎉 Tuyệt vời! Không có dòng nào bị lỗi dữ liệu.")
+        if not error_items: st.info("🎉 Tất cả dữ liệu đã chính xác, không có dòng nào bị lỗi!")
         else:
             err_dict = {i['id']: i['old'] for i in error_items}
-            sel_id = st.selectbox("Chọn địa chỉ cần hỗ trợ sửa:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x], key="excel_err_select")
+            sel_id = st.selectbox("Chọn địa chỉ lỗi để xử lý:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x], key="excel_err_select")
             sel_item = next(i for i in st.session_state.app_data_excel if i['id'] == sel_id)
             
             c1, c2, c3 = st.columns(3)
@@ -374,29 +305,24 @@ with main_tab1:
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
                 sug_addr = force_convert_address(sel_item['old'], exact_row)
-                final_edit = st.text_input("✍️ Kiểm tra lại địa chỉ kết quả:", value=sug_addr, key="edit_excel_input")
+                final_edit = st.text_input("✍️ Chỉnh sửa lại kết quả:", value=sug_addr, key="edit_excel_input")
                 if st.button("💾 Lưu kết quả sửa", type="primary", key="save_excel"):
                     for d in st.session_state.app_data_excel:
                         if d['id'] == sel_id:
                             d.update({'new': final_edit, 'is_error': False, 'notes': "✅ Đã sửa thủ công"})
                     st.rerun()
 
-    with sub_tab3:
-        st.write("")
+    elif sub_mode_excel == "Trạm xuất dữ liệu":
         if st.session_state.app_data_excel:
             df_out = pd.DataFrame(st.session_state.app_data_excel)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Gốc', 'new': 'Địa chỉ Mới', 'notes': 'Ghi chú'})
             st.dataframe(df_out, use_container_width=True)
-            st.download_button("📥 Tải file CSV", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_ChuyenDoi_Excel.csv", mime="text/csv", type="primary", key="dl_excel")
-        else:
-            st.info("Chưa có dữ liệu. Vui lòng nhập danh sách ở Tab 1 để bắt đầu!")
-
+            st.download_button("📥 Tải file CSV", data=df_out.to_csv(index=False, encoding='utf-8-sig'), file_name="ChuyenDoi_Excel.csv", mime="text/csv", type="primary", key="dl_excel")
+        else: st.info("Chưa có dữ liệu. Vui lòng chuyển đổi ở tab đầu tiên trước!")
 
 # ------------------------------------------
 # PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (AI)
 # ------------------------------------------
-with main_tab2:
-    st.write("")
-    # Cấu hình API Key gọn gàng trong Expander
+else:
     with st.expander("🔑 Bảng cấu hình API Google Gemini", expanded=True):
         c1, c2 = st.columns([1, 2])
         api_key = c1.text_input("Nhập Google Gemini API Key:", type="password", key="ai_key_input", placeholder="AIzaSy...")
@@ -409,19 +335,23 @@ with main_tab2:
             except Exception:
                 st.error("API Key chưa hợp lệ!")
 
-    st.write("")
-    sub_ai_tab1, sub_ai_tab2, sub_ai_tab3 = st.tabs([
-        "📤 Chuyển đổi hàng loạt", 
-        "🚑 Trạm cấp cứu AI", 
-        "📥 Trạm xuất dữ liệu"
-    ])
-    
-    with sub_ai_tab1:
-        st.write("")
-        input_text_ai = st.text_area("Nhập danh sách địa chỉ mới sáp nhập cần dịch ngược:", height=180, key="ai_input", placeholder="Ví dụ:\n1118 Kha Vạn Cân, Phường Thủ Đức, TP HCM\nK29/2 Nguyễn Như Đãi, Phường Cẩm Lệ, Đà Nẵng...")
+    sub_mode_ai = option_menu(
+        menu_title=None,
+        options=["Chuyển đổi hàng loạt", "Trạm cấp cứu AI", "Trạm xuất dữ liệu"],
+        icons=["cpu", "patch-exclamation", "download"],
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"},
+            "icon": {"font-size": "13px"},
+            "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"},
+            "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"},
+        }
+    )
+
+    if sub_mode_ai == "Chuyển đổi hàng loạt":
+        input_text_ai = st.text_area("Nhập danh sách địa chỉ mới/sáp nhập cần dịch ngược:", height=180, key="ai_input", placeholder="Ví dụ:\n1118 Kha Vạn Cân, Phường Thủ Đức, TP HCM\nK29/2 Nguyễn Như Đãi, Phường Cẩm Lệ, Đà Nẵng...")
         if st.button("⏪ Yêu cầu AI dịch ngược", type="primary", key="btn_ai"):
-            if not selected_model: 
-                st.warning("⚠️ Vui lòng nhập API Key hợp lệ ở khung cấu hình phía trên trước!")
+            if not selected_model: st.warning("⚠️ Vui lòng nhập API Key hợp lệ ở bảng cấu hình phía trên trước!")
             elif input_text_ai.strip():
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 model = genai.GenerativeModel(selected_model)
@@ -436,13 +366,11 @@ with main_tab2:
 
         if st.session_state.app_data_ai:
             errs = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
-            st.success(f"🎉 Hoàn tất! Đã phân tích {len(st.session_state.app_data_ai)} dòng. (Có {errs} ca thiếu dữ liệu ➡️ Chuyển sang tab 'Trạm cấp cứu AI')")
+            st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {errs} ca thiếu dữ liệu ➡️ Chọn tab 'Trạm cấp cứu AI' phía trên)")
 
-    with sub_ai_tab2:
-        st.write("")
+    elif sub_mode_ai == "Trạm cấp cứu AI":
         error_items_ai = [d for d in st.session_state.app_data_ai if d['is_error']]
-        if not error_items_ai: 
-            st.info("🎉 Tất cả địa chỉ đã được AI dịch ngược thành công!")
+        if not error_items_ai: st.info("🎉 Tất cả địa chỉ đã được AI dịch ngược thành công!")
         else:
             st.warning("Các địa chỉ dưới đây bị thiếu dữ liệu (như tên đường/phường), vui lòng bổ sung thêm manh mối!")
             err_dict_ai = {i['id']: i['old'] for i in error_items_ai}
@@ -461,14 +389,11 @@ with main_tab2:
                             if d['id'] == sel_id_ai:
                                 d.update({'old': new_context, 'new': res, 'is_error': False, 'notes': "✅ Đã cấp cứu thành công"})
                         st.rerun()
-                    else:
-                        st.error("Vẫn chưa đủ dữ liệu, AI chưa thể tra được!")
+                    else: st.error("Vẫn chưa đủ dữ liệu, AI chưa thể tra được!")
 
-    with sub_ai_tab3:
-        st.write("")
+    elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
             df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Đầu vào', 'new': 'Kết quả AI Dịch ngược', 'notes': 'Trạng thái'})
             st.dataframe(df_out_ai, use_container_width=True)
-            st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="Data_ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
-        else:
-            st.info("Chưa có dữ liệu. Vui lòng chạy phân tích AI ở Tab 1 trước!")
+            st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
+        else: st.info("Chưa có dữ liệu. Vui lòng chạy phân tích AI ở tab đầu tiên trước!")
