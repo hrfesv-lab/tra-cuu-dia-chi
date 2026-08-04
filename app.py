@@ -408,23 +408,28 @@ with tab4:
                     if not new_address_input:
                         st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
                     else:
-                        with st.spinner(f"Đang kết nối não bộ {selected_model}..."):
+                       with st.spinner(f"Đang kết nối não bộ {selected_model}... (Chế độ Turbo)"):
                             try:
-                                model = genai.GenerativeModel(selected_model)
-                                prompt = f"""
-                                Bạn là chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (phiên bản trước sáp nhập 2023-2025).
-
-                                Địa chỉ đầu vào (có thể bị mâu thuẫn/gõ sai): "{new_address_input}"
+                                # TỐI ƯU HÓA TỐC ĐỘ (Ép AI trả lời như máy móc, cấm sáng tạo)
+                                generation_config = {
+                                    "temperature": 0.0, # Độ sáng tạo = 0 (Nhanh và chính xác tuyệt đối)
+                                    "max_output_tokens": 150, # Cắt ngắn độ dài câu trả lời
+                                }
                                 
-                                NGUYÊN TẮC SUY LUẬN BẮT BUỘC (Đọc kỹ):
-                                1. Xử lý mâu thuẫn: Nếu địa chỉ có sự mâu thuẫn (VD: Phường A ở Tỉnh B nhưng người dùng gõ Tỉnh C), BẮT BUỘC phải ưu tiên giữ nguyên các đơn vị CẤP NHỎ (Khu phố, Đường, Phường) để làm chuẩn, từ đó sửa lại CẤP LỚN (Quận/Huyện, Tỉnh) cho đúng. (Ví dụ: Thấy Ninh Chữ thì phải tự biết đó là Ninh Thuận và sửa lại tỉnh).
-                                2. Khung thời gian: Chỉ xét lịch sử sáp nhập trong khoảng 2023-2025. Không lùi về các năm như 2005, 1997...
-                                3. Format trả về 1 dòng duy nhất: [Số nhà/Đường/Khu phố], [Phường/Xã CŨ], [Quận/Huyện CŨ], [Tỉnh/Thành phố CŨ].
-                                4. Dòng tiếp theo ghi: "Giải thích: [Nêu ngắn gọn lý do sửa lỗi Tỉnh/Huyện hoặc tình trạng sáp nhập]"
+                                model = genai.GenerativeModel(selected_model, generation_config=generation_config)
+                                
+                                prompt = f"""
+                                Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (trước sáp nhập 2023-2025).
+                                Địa chỉ: "{new_address_input}"
+                                
+                                Luật:
+                                1. Nếu địa chỉ chỉ có "Tổ/Khu phố" + "Quận/Huyện" (thiếu tên Đường/Phường cụ thể), hãy báo "Thiếu dữ liệu đường/phường để xác định".
+                                2. Ưu tiên cấp nhỏ (Đường/Khu phố) để sửa lỗi cấp lớn (Phường/Quận bị gõ sai).
+                                3. Chỉ trả về 1 dòng format: [Số nhà/Đường], [Phường/Xã], [Quận/Huyện], [Tỉnh/Thành phố]. Thêm "|" và 1 câu giải thích cực ngắn.
                                 """
                                 
                                 response = model.generate_content(prompt)
-                                st.success("🎉 Kết quả suy luận từ AI:")
+                                st.success("⚡ Kết quả (Chế độ siêu tốc):")
                                 st.write(response.text)
                                 
                             except Exception as e:
