@@ -171,7 +171,7 @@ def force_convert_address(query, row):
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
 # ==========================================
-# 3. HÀM XỬ LÝ AI (MỚI -> CŨ) - TRẢ VỀ ĐỊA CHỈ + MỨC ĐỘ TIN CẬY
+# 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
@@ -302,12 +302,12 @@ if "CŨ ➡️ MỚI" in main_mode:
             
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
-            tinh_sel = c1.selectbox("Tỉnh/Thành", ["-- Chọn --"] + tinh_list, key="tinh_sel")
+            tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list, key="tinh_sel")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
-                huyen_sel = c2.selectbox("Quận/Huyện", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel")
+                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel")
                 if huyen_sel != "-- Chọn --":
-                    xa_sel = c3.selectbox("Phường/Xã", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()), key="xa_sel")
+                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()), key="xa_sel")
             
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
@@ -384,30 +384,50 @@ else:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
             st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
-    # TRẠM CẤP CỨU AI: CẤU TRÚC ĐỒNG BỘ CHUẨN ĐÚNG NHƯ PHÂN HỆ EXCEL
+    # TRẠM CẤP CỨU AI: FIX LOGIC CHO CHỌN TỈNH/HUYỆN/XÃ MỚI CHUẨN ĐỂ TRA RA ĐỊA CHỈ CŨ
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
         if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
         else:
-            st.warning("Các địa chỉ dưới đây AI đánh giá mức độ tin cậy 'Nghi ngờ'. Bạn có thể kiểm tra và chọn ĐVHC chuẩn bên dưới để mã hóa lại!")
+            st.warning("Các địa chỉ dưới đây bị nghi ngờ hoặc gõ sai. Vui lòng chọn Tỉnh/Huyện/Xã MỚI chuẩn để hệ thống tra ngược lại Địa chỉ CŨ tương ứng!")
             err_dict_ai = {i['id']: f"{i['old']} ➡️ [Dự đoán AI: {i['new']}]" for i in suspect_items}
             sel_id_ai = st.selectbox("Chọn địa chỉ cần cấp cứu/xác nhận:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
             sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
             
             c1, c2, c3 = st.columns(3)
-            tinh_list_ai = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
-            tinh_sel_ai = c1.selectbox("Tỉnh/Thành chuẩn", ["-- Chọn --"] + tinh_list_ai, key="tinh_sel_ai")
-            huyen_sel_ai, xa_sel_ai = "-- Chọn --", "-- Chọn --"
-            if tinh_sel_ai != "-- Chọn --":
-                huyen_sel_ai = c2.selectbox("Quận/Huyện chuẩn", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel_ai]['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel_ai")
-                if huyen_sel_ai != "-- Chọn --":
-                    xa_sel_ai = c3.selectbox("Phường/Xã chuẩn", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel_ai) & (df['Huyện cũ'] == huyen_sel_ai)]['Tên Xã cũ'].dropna().unique().tolist()), key="xa_sel_ai")
+            # NẠP DANH SÁCH TỈNH MỚI CHUẨN
+            tinh_list_new = sorted(df['Tỉnh mới'].dropna().unique().tolist())
+            tinh_sel_new = c1.selectbox("Tỉnh/Thành MỚI chuẩn", ["-- Chọn --"] + tinh_list_new, key="tinh_sel_new")
+            huyen_sel_new, xa_sel_new = "-- Chọn --", "-- Chọn --"
             
-            if xa_sel_ai != "-- Chọn --":
-                exact_row_ai = df[(df['Tỉnh cũ'] == tinh_sel_ai) & (df['Huyện cũ'] == huyen_sel_ai) & (df['Tên Xã cũ'] == xa_sel_ai)].iloc[0]
-                sug_addr_ai = force_convert_address(sel_item_ai['old'], exact_row_ai)
-                final_edit_ai = st.text_input("✍️ Kết quả sau khi ghép nối chuẩn:", value=sug_addr_ai, key="edit_ai_input")
-                if st.button("💾 Xác nhận lưu địa chỉ chuẩn này", type="primary", key="save_ai_fix"):
+            if tinh_sel_new != "-- Chọn --":
+                # NẠP QUẬN/HUYỆN CHUẨN CỦA TỈNH MỚI ĐÓ (TỪ DATABASE)
+                df_tinh = df[df['Tỉnh mới'] == tinh_sel_new]
+                huyen_sel_new = c2.selectbox("Quận/Huyện cũ tương ứng", ["-- Chọn --"] + sorted(df_tinh['Huyện cũ'].dropna().unique().tolist()), key="huyen_sel_new")
+                
+                if huyen_sel_new != "-- Chọn --":
+                    # NẠP XÃ MỚI CHUẨN
+                    df_huyen = df_tinh[df_tinh['Huyện cũ'] == huyen_sel_new]
+                    xa_sel_new = c3.selectbox("Phường/Xã MỚI chuẩn", ["-- Chọn --"] + sorted(df_huyen['Tên Xã mới'].dropna().unique().tolist()), key="xa_sel_new")
+            
+            if xa_sel_new != "-- Chọn --":
+                # LẤY HÀNG DỮ LIỆU TƯƠNG ỨNG TRONG DATABASE
+                exact_row_ai = df[(df['Tỉnh mới'] == tinh_sel_new) & (df['Huyện cũ'] == huyen_sel_new) & (df['Tên Xã mới'] == xa_sel_new)].iloc[0]
+                
+                # TRÍCH XUẤT PHẦN ĐẦU (SỐ NHÀ/ĐƯỜNG) TỪ ĐỊA CHỈ ĐẦU VÀO
+                input_addr = sel_item_ai['old']
+                parts = [p.strip() for p in input_addr.split(',') if p.strip()]
+                prefix_street = parts[0] if parts else ""
+                
+                # TẠO ĐỊA CHỈ CŨ HOÀN CHỈNH: [Đường] + [Xã cũ] + [Huyện cũ] + [Tỉnh cũ]
+                old_xa = exact_row_ai['Tên Xã cũ']
+                old_huyen = exact_row_ai['Huyện cũ']
+                old_tinh = exact_row_ai['Tỉnh cũ']
+                
+                sug_addr_old = f"{prefix_street}, {old_xa}, {old_huyen}, {old_tinh}"
+                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn sau khi khớp nối database:", value=sug_addr_old, key="edit_ai_input")
+                
+                if st.button("💾 Xác nhận lưu địa chỉ CŨ chuẩn này", type="primary", key="save_ai_fix"):
                     for d in st.session_state.app_data_ai:
                         if d['id'] == sel_id_ai:
                             d.update({'new': final_edit_ai, 'confidence': 'Đã xác nhận', 'is_error': False})
@@ -415,7 +435,6 @@ else:
 
     elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
-            # XUẤT ĐỦ 3 CỘT: ĐỊA CHỈ ĐẦU VÀO, KẾT QUẢ AI, MỨC ĐỘ TIN CẬY
             df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'confidence']].rename(
                 columns={'old': 'Địa chỉ Đầu vào', 'new': 'Địa chỉ AI Dịch ngược', 'confidence': 'Mức độ tin cậy'}
             )
