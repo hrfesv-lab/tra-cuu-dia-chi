@@ -227,11 +227,11 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     return all_results
 
 # ==========================================
-# 4. GIAO DIỆN CHÍNH (OPTION MENU DẠNG VIÊN THUỐC ĐẸP MẮT)
+# 4. GIAO DIỆN CHÍNH
 # ==========================================
 st.markdown("### 📍 Công cụ Chuyển đổi Địa chỉ Hành chính")
 
-# MENU CẤP 1: TẠO KHUNG ĐIỀU HƯỚNG DẠNG VIÊN THUỐC SANG TRỌNG
+# MENU CẤP 1
 main_mode = option_menu(
     menu_title=None,
     options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI)"],
@@ -357,17 +357,17 @@ else:
                 model = genai.GenerativeModel(selected_model)
                 results = process_batch_with_intelligence(model, queries)
                 
-              st.session_state.app_data_ai = []
+                st.session_state.app_data_ai = []
                 for i, q in enumerate(queries):
                     res = results.get(q, "LỖI: Không nhận được phản hồi")
                     is_err = "LỖI:" in res.upper()
                     
-                    # Cắt đôi chuỗi tại dấu "|" để tách Kết quả và Ghi chú
+                    # CẮT ĐÔI CHUỖI TẠI DẤU "|" ĐỂ TÁCH KẾT QUẢ VÀ GHI CHÚ
                     if is_err:
                         final_new = ""
                         final_note = res
                     else:
-                        parts = res.split("|", 1) # Cắt tối đa 1 lần
+                        parts = res.split("|", 1)
                         final_new = parts[0].strip()
                         final_note = parts[1].strip() if len(parts) > 1 else "AI Xử lý thành công"
                         
@@ -394,16 +394,20 @@ else:
                 with st.spinner("AI đang thử lại..."):
                     model = genai.GenerativeModel(selected_model)
                     res = process_batch_with_intelligence(model, [new_context])[new_context]
-                    if "LỖI:" not in res.upper():
+                    is_err = "LỖI:" in res.upper()
+                    if not is_err:
+                        parts = res.split("|", 1)
+                        final_new = parts[0].strip()
+                        final_note = parts[1].strip() if len(parts) > 1 else "✅ Đã cấp cứu thành công"
                         for d in st.session_state.app_data_ai:
                             if d['id'] == sel_id_ai:
-                                d.update({'old': new_context, 'new': res, 'is_error': False, 'notes': "✅ Đã cấp cứu thành công"})
+                                d.update({'old': new_context, 'new': final_new, 'notes': final_note, 'is_error': False})
                         st.rerun()
                     else: st.error("Vẫn chưa đủ dữ liệu, AI chưa thể tra được!")
 
     elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
-            df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Đầu vào', 'new': 'Kết quả AI Dịch ngược', 'notes': 'Trạng thái'})
+            df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Đầu vào', 'new': 'Kết quả AI Dịch ngược', 'notes': 'Ghi chú / Giải thích'})
             st.dataframe(df_out_ai, use_container_width=True)
             st.download_button("📥 Tải file CSV", data=df_out_ai.to_csv(index=False, encoding='utf-8-sig'), file_name="ChuyenDoi_AI.csv", mime="text/csv", type="primary", key="dl_ai")
         else: st.info("Chưa có dữ liệu. Vui lòng chạy phân tích AI ở tab đầu tiên trước!")
