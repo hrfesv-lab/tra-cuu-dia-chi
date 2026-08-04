@@ -408,24 +408,24 @@ with tab4:
                     if not new_address_input:
                         st.warning("Vui lòng nhập địa chỉ cần tra cứu!")
                     else:
-                       with st.spinner(f"Đang kết nối não bộ {selected_model}... (Chế độ Turbo)"):
+                      with st.spinner(f"Đang kết nối não bộ {selected_model}... (Chế độ Turbo)"):
                             try:
-                                # TỐI ƯU HÓA TỐC ĐỘ (Ép AI trả lời như máy móc, cấm sáng tạo)
+                                # Nới lỏng một chút xíu để AI không bị "đơ" (0.2 thay vì 0)
                                 generation_config = {
-                                    "temperature": 0.0, # Độ sáng tạo = 0 (Nhanh và chính xác tuyệt đối)
-                                    "max_output_tokens": 150, # Cắt ngắn độ dài câu trả lời
+                                    "temperature": 0.2, 
+                                    "max_output_tokens": 300, # Cho phép độ dài câu trả lời thoải mái hơn
                                 }
                                 
                                 model = genai.GenerativeModel(selected_model, generation_config=generation_config)
                                 
                                 prompt = f"""
-                                Nhiệm vụ: Tra ngược địa chỉ MỚI về địa chỉ CŨ (trước sáp nhập 2023-2025).
-                                Địa chỉ: "{new_address_input}"
+                                Bạn là chuyên gia địa lý Việt Nam. Nhiệm vụ: Sửa lỗi địa chỉ và tra ngược về địa chỉ chuẩn trước năm 2025.
+                                Địa chỉ đầu vào: "{new_address_input}"
                                 
-                                Luật:
-                                1. Nếu địa chỉ chỉ có "Tổ/Khu phố" + "Quận/Huyện" (thiếu tên Đường/Phường cụ thể), hãy báo "Thiếu dữ liệu đường/phường để xác định".
-                                2. Ưu tiên cấp nhỏ (Đường/Khu phố) để sửa lỗi cấp lớn (Phường/Quận bị gõ sai).
-                                3. Chỉ trả về 1 dòng format: [Số nhà/Đường], [Phường/Xã], [Quận/Huyện], [Tỉnh/Thành phố]. Thêm "|" và 1 câu giải thích cực ngắn.
+                                Yêu cầu BẮT BUỘC:
+                                1. Dùng tên Đường (VD: Kha Vạn Cân) để xác định đúng tên Phường/Quận. (Phường Thủ Đức là gõ sai, Kha Vạn Cân phải thuộc phường Linh Chiểu/Linh Tây... thuộc TP Thủ Đức/Quận Thủ Đức cũ).
+                                2. TRẢ VỀ ĐẦY ĐỦ CHUỖI ĐỊA CHỈ theo format: [Số nhà/Đường], [Phường/Xã chuẩn], [Quận/Huyện/Thành phố thuộc tỉnh], [Tỉnh/Thành phố trung ương].
+                                3. Xuống dòng và ghi chữ "Giải thích:" kèm lý do ngắn gọn.
                                 """
                                 
                                 response = model.generate_content(prompt)
