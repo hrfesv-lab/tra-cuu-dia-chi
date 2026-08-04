@@ -193,7 +193,7 @@ def extract_street_prefix(address_str):
     return parts[0] if parts else ""
 
 # ==========================================
-# 3. HÀM XỬ LÝ AI RAG (LỌC THEO CỘT TỈNH MỚI VÀ KHOANH VÙNG BẢNG EXCEL)
+# 3. HÀM XỬ LÝ AI RAG (ĐÃ FIX LỖI EMPTY DATAFRAME)
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
@@ -211,32 +211,31 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     progress_bar = st.progress(0, text="Đang khoanh vùng dữ liệu cột Tỉnh Mới và đối chiếu AI...")
     
     for idx, batch in enumerate(batches):
-        # 🟢 BƯỚC QUAN TRỌNG: QUÉT TRỰC TIẾP VÀO CỘT 'TỈNH MỚI' ĐỂ KHOANH VÙNG BẢNG EXCEL
         relevant_df_list = []
-        unique_provs_new = df['Tỉnh mới'].dropna().unique()
         
-        for addr in batch:
-            addr_norm = normalize_for_search(addr).lower()
-            found_prov = False
-            for prov in unique_provs_new:
-                prov_core = get_core_name(prov).lower()
-                prov_full = str(prov).lower()
-                # Kiểm tra xem tên Tỉnh Mới có nằm trong địa chỉ người dùng nhập không
-                if prov_full in addr_norm or (prov_core and prov_core in addr_norm):
-                    sub = df[df['Tỉnh mới'] == prov][['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']]
-                    relevant_df_list.append(sub)
-                    found_prov = True
-                    break
+        if not df.empty and 'Tỉnh mới' in df.columns:
+            unique_provs_new = df['Tỉnh mới'].dropna().unique()
+            for addr in batch:
+                addr_norm = normalize_for_search(addr).lower()
+                for prov in unique_provs_new:
+                    prov_core = get_core_name(prov).lower()
+                    prov_full = str(prov).lower()
+                    if (prov_full and prov_full in addr_norm) or (prov_core and prov_core in addr_norm):
+                        sub = df[df['Tỉnh mới'] == prov][['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']]
+                        relevant_df_list.append(sub)
+                        break
                     
-        # Nếu khoanh vùng được theo Tỉnh Mới thì dùng bảng thu nhỏ đó, không thì lấy 120 dòng đầu
+        # Tự động phòng thủ tránh bẫy Empty DataFrame
         if relevant_df_list:
-            context_df = pd.concat(relevant_df_list).drop_duplicates().head(200)
+            context_df = pd.concat(relevant_df_list, ignore_index=True).drop_duplicates().head(200)
         else:
-            context_df = df[['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].head(120)
+            if not df.empty and all(col in df.columns for col in ['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']):
+                context_df = df[['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].head(120)
+            else:
+                context_df = pd.DataFrame(columns=['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ'])
             
         context_json = context_df.to_json(orient='records', ensure_ascii=False)
 
-        # 🟢 NẠP BẢNG DỮ LIỆU ĐÃ KHOANH VÙNG CHO AI TRUY VẤN
         prompt = f"""
         Bạn là hệ thống đối chiếu địa giới hành chính Việt Nam.
         DƯỚI ĐÂY LÀ BẢNG DỮ LIỆU THAM CHIẾU EXCEL ĐÃ ĐƯỢC KHOANH VÙNG THEO TỈNH MỚI (MỚI ↔ CŨ):
@@ -354,7 +353,7 @@ if "CŨ ➡️ MỚI" in main_mode:
             sel_item = next(i for i in st.session_state.app_data_excel if i['id'] == sel_id)
             
             c1, c2, c3 = st.columns(3)
-            tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist())
+            tinh_list = sorted(df['Tỉnh cũ'].dropna().unique().tolist()) if not df.empty else []
             tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list, key="tinh_sel")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
@@ -447,7 +446,7 @@ else:
             sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
             
             c1, c2 = st.columns(2)
-            tinh_list_new = sorted(df['Tỉnh mới'].dropna().unique().tolist())
+            tinh_list_new = sorted(df['Tỉnh mới'].dropna().unique().tolist()) if not df.empty else []
             tinh_sel_new = c1.selectbox("1. Chọn Tỉnh/Thành MỚI chuẩn", ["-- Chọn --"] + tinh_list_new, key="tinh_sel_new")
             
             xa_sel_new = "-- Chọn --"
