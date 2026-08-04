@@ -398,7 +398,7 @@ with tab4:
                 try:
                     genai.configure(api_key=api_key_input)
                     # Sử dụng model flash siêu tốc độ
-                    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                    model = genai.GenerativeModel('gemini-pro')
                     
                     prompt = f"""
                     Bạn là một chuyên gia bản đồ và địa giới hành chính Việt Nam. Nhiệm vụ của bạn là tra ngược địa chỉ hiện tại về địa chỉ cũ trước đợt sáp nhập gần nhất (hoặc sửa lại cho đúng tên Phường/Quận nếu người dùng gõ sai).
