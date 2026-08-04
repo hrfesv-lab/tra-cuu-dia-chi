@@ -177,7 +177,6 @@ def force_convert_address(query, row):
     
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
-# HÀM BÓC TÁCH PHẦN SỐ NHÀ/ĐƯỜNG/THÔN/XÓM TỰ ĐỘNG
 def extract_street_prefix(address_str):
     if not address_str: return ""
     parts = [p.strip() for p in address_str.split(',') if p.strip()]
@@ -194,7 +193,7 @@ def extract_street_prefix(address_str):
     return parts[0] if parts else ""
 
 # ==========================================
-# 3. HÀM XỬ LÝ AI (MỚI -> CŨ)
+# 3. HÀM XỬ LÝ AI RAG (LỌC THEO CỘT TỈNH MỚI VÀ KHOANH VÙNG BẢNG EXCEL)
 # ==========================================
 def process_batch_with_intelligence(model, address_list, batch_size=5):
     all_results = {}
@@ -209,21 +208,52 @@ def process_batch_with_intelligence(model, address_list, batch_size=5):
     if not uncached_addresses: return all_results
     
     batches = [uncached_addresses[i:i + batch_size] for i in range(0, len(uncached_addresses), batch_size)]
-    progress_bar = st.progress(0, text="Đang phân tích và đánh giá độ tin cậy...")
+    progress_bar = st.progress(0, text="Đang khoanh vùng dữ liệu cột Tỉnh Mới và đối chiếu AI...")
     
     for idx, batch in enumerate(batches):
-        prompt = f"""
-        Bạn là chuyên gia địa giới hành chính Việt Nam. Tra ngược danh sách địa chỉ MỚI sau đây về địa chỉ CŨ (trước sáp nhập 2025).
-        Danh sách:
-        {json.dumps(batch, ensure_ascii=False)}
+        # 🟢 BƯỚC QUAN TRỌNG: QUÉT TRỰC TIẾP VÀO CỘT 'TỈNH MỚI' ĐỂ KHOANH VÙNG BẢNG EXCEL
+        relevant_df_list = []
+        unique_provs_new = df['Tỉnh mới'].dropna().unique()
         
-        Yêu cầu BẮT BUỘC KHẮT KHE:
-        1. Trả về kết quả dưới dạng JSON hợp lệ. Key là địa chỉ gốc, Value là một Object chứa 2 trường: "address" và "confidence".
-        2. Trường "confidence" ghi nhận mức độ tin cậy:
-           - "Cao": CHỈ DÙNG KHI bạn biết rõ 100% lịch sử sáp nhập địa giới chính xác.
-           - "Trung bình": Giữ nguyên địa chỉ hoặc sửa lỗi chính tả nhẹ.
-           - "Nghi ngờ": BẮT BUỘC ĐÁNH "Nghi ngờ" nếu địa chỉ có dấu hiệu sai tên Phường/Đường với thực tế (VD: Đường 15 Tam Bình nhưng thực chất thuộc Bình Chiểu, hoặc mâu thuẫn Tỉnh/Huyện).
-        3. Trường "address": Chuỗi địa chỉ dự đoán theo format "[Số nhà/Đường], [Phường/Xã cũ], [Quận/Huyện cũ], [Tỉnh/Thành phố cũ]".
+        for addr in batch:
+            addr_norm = normalize_for_search(addr).lower()
+            found_prov = False
+            for prov in unique_provs_new:
+                prov_core = get_core_name(prov).lower()
+                prov_full = str(prov).lower()
+                # Kiểm tra xem tên Tỉnh Mới có nằm trong địa chỉ người dùng nhập không
+                if prov_full in addr_norm or (prov_core and prov_core in addr_norm):
+                    sub = df[df['Tỉnh mới'] == prov][['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']]
+                    relevant_df_list.append(sub)
+                    found_prov = True
+                    break
+                    
+        # Nếu khoanh vùng được theo Tỉnh Mới thì dùng bảng thu nhỏ đó, không thì lấy 120 dòng đầu
+        if relevant_df_list:
+            context_df = pd.concat(relevant_df_list).drop_duplicates().head(200)
+        else:
+            context_df = df[['Tên Xã mới', 'Tỉnh mới', 'Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].head(120)
+            
+        context_json = context_df.to_json(orient='records', ensure_ascii=False)
+
+        # 🟢 NẠP BẢNG DỮ LIỆU ĐÃ KHOANH VÙNG CHO AI TRUY VẤN
+        prompt = f"""
+        Bạn là hệ thống đối chiếu địa giới hành chính Việt Nam.
+        DƯỚI ĐÂY LÀ BẢNG DỮ LIỆU THAM CHIẾU EXCEL ĐÃ ĐƯỢC KHOANH VÙNG THEO TỈNH MỚI (MỚI ↔ CŨ):
+        {context_json}
+
+        DANH SÁCH ĐỊA CHỈ MỚI ĐẦU VÀO CẦN TRA NGƯỢC VỀ CŨ:
+        {json.dumps(batch, ensure_ascii=False)}
+
+        NHIỆM VỤ CỦA BẠN:
+        1. Đọc kĩ địa chỉ MỚI đầu vào, dóng sang cột "Tên Xã mới" và "Tỉnh mới" trong BẢNG DỮ LIỆU THAM CHIẾU ở trên.
+        2. Rút ra thông tin CŨ tương ứng gồm: "Tên Xã cũ", "Huyện cũ", "Tỉnh cũ".
+        3. Trả về JSON hợp lệ. Key là địa chỉ gốc đầu vào, Value là Object: {{"address": "...", "confidence": "..."}}.
+        4. Trường "confidence": 
+           - "Cao": Tìm thấy Xã mới khớp trong BẢNG DỮ LIỆU THAM CHIẾU.
+           - "Trung bình": Giữ nguyên địa chỉ hoặc chỉ sửa chính tả nhẹ.
+           - "Nghi ngờ": Không thấy trong bảng hoặc địa chỉ quá vô lý/mâu thuẫn.
+        5. Trường "address": Chuỗi định dạng "[Số nhà/Đường/Thôn/Ấp], [Tên Xã cũ], [Huyện cũ], [Tỉnh cũ]".
         """
         
         max_retries, delay = 3, 2
@@ -264,7 +294,7 @@ st.markdown("### 📍 Công cụ Chuyển đổi Địa chỉ Hành chính")
 # MENU CẤP 1
 main_mode = option_menu(
     menu_title=None,
-    options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI)"],
+    options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI + RAG)"],
     icons=["rocket-takeoff", "robot"],
     orientation="horizontal",
     styles={
@@ -350,7 +380,7 @@ if "CŨ ➡️ MỚI" in main_mode:
         else: st.info("Chưa có dữ liệu. Vui lòng chuyển đổi ở tab đầu tiên trước!")
 
 # ------------------------------------------
-# PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (AI)
+# PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (AI + RAG EXCEL TỈNH MỚI)
 # ------------------------------------------
 else:
     with st.expander("🔑 Bảng cấu hình API Google Gemini", expanded=True):
@@ -465,7 +495,6 @@ else:
                     if "edit_ai_input" in st.session_state: del st.session_state.edit_ai_input
                     st.rerun()
 
-    # TRẠM XUẤT DỮ LIỆU: BỔ SUNG TÍNH NĂNG "ĐẨY CA SAI SANG TRẠM CẤP CỨU"
     elif sub_mode_ai == "Trạm xuất dữ liệu":
         if st.session_state.app_data_ai:
             df_out_ai = pd.DataFrame(st.session_state.app_data_ai)[['old', 'new', 'confidence']].rename(
