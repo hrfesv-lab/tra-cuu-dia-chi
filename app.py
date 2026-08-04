@@ -622,6 +622,10 @@ else:
                     for d in st.session_state.app_data_ai:
                         if d['id'] == sel_id_ai:
                             d.update({'new': final_edit_ai, 'confidence': 'Đã sửa tay', 'is_error': False})
+                            
+                            # 👇 DÒNG THÊM MỚI: Ép AI học lại và lưu kết quả con người sửa vào bộ nhớ đệm
+                            st.session_state.ai_cache[d['old']] = {"address": final_edit_ai, "confidence": "Đã sửa tay"}
+                            
                     if "edit_ai_input" in st.session_state: del st.session_state.edit_ai_input
                     st.rerun()
 
