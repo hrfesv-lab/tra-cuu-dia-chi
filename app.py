@@ -36,7 +36,7 @@ if 'app_data_ai' not in st.session_state: st.session_state.app_data_ai = []
 if 'ai_cache' not in st.session_state: st.session_state.ai_cache = {}
 
 # ==========================================
-# 2. HÀM XỬ LÝ EXCEL & BÓC TÁCH CHUẨN
+# 2. HÀM XỬ LÝ EXCEL & CHUẨN HÓA LÕI
 # ==========================================
 def get_core_name(name):
     if not name: return ""
@@ -57,14 +57,19 @@ def load_data():
         df['Tỉnh cũ'] = df['Tỉnh cũ'].apply(clean_code)
         df['Tên Xã mới'] = df['Tên Xã mới'].apply(clean_code)
         df['Tỉnh mới'] = df['Tỉnh, thành phố'].apply(clean_code)
+        
+        # Tạo cột Lõi chuẩn hóa (Lower, sạch prefix)
         df['xa_core'] = df['Tên Xã cũ'].apply(get_core_name)
         df['huyen_core'] = df['Huyện cũ'].apply(get_core_name)
         df['tinh_core'] = df['Tỉnh cũ'].apply(get_core_name)
         df['xa_core_lower'] = df['xa_core'].str.lower()
         df['huyen_core_lower'] = df['huyen_core'].str.lower()
         
-        df['xa_moi_core'] = df['Tên Xã mới'].apply(get_core_name).str.lower()
-        df['tinh_moi_core'] = df['Tỉnh mới'].apply(get_core_name).str.lower()
+        df['xa_moi_core'] = df['Tên Xã mới'].apply(get_core_name)
+        df['tinh_moi_core'] = df['Tỉnh mới'].apply(get_core_name)
+        df['xa_moi_core_lower'] = df['xa_moi_core'].str.lower()
+        df['tinh_moi_core_lower'] = df['tinh_moi_core'].str.lower()
+        
         return df, df.to_dict('records')
     except Exception:
         return pd.DataFrame(), []
@@ -180,6 +185,7 @@ def force_convert_address(query, row):
     
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
+# HÀM BÓC TÁCH PHẦN "SỐ NHÀ / ĐƯỜNG / THÔN / XÓM / ẤP"
 def extract_street_prefix(address_str):
     if not address_str: return ""
     parts = [p.strip() for p in address_str.split(',') if p.strip()]
@@ -196,7 +202,7 @@ def extract_street_prefix(address_str):
     return parts[0] if parts else ""
 
 # ==========================================
-# 3. THUẬT TOÁN BÓC TÁCH MỚI ➡️ DÒ CỨNG EXCEL ➡️ KHOANH VÙNG CHO AI
+# 3. QUY TRÌNH DỊCH NGƯỢC CHUẨN 7 BƯỚC (DÒ EXCEL -> KHOANH VÙNG -> AI)
 # ==========================================
 def smart_ai_lookup(model, address_list):
     results = {}
@@ -206,53 +212,68 @@ def smart_ai_lookup(model, address_list):
             results[addr] = st.session_state.ai_cache[addr]
             continue
             
-        norm_addr = normalize_for_search(addr)
-        addr_lower = norm_addr.lower()
-        street_prefix = extract_street_prefix(addr)
+        # BƯỚC 1 & 2: BÓC TÁCH & CHUẨN HÓA ĐỊA CHỈ NGUYÊN BẢN
+        norm_addr = normalize_formatting(normalize_for_search(addr))
+        street_prefix = extract_street_prefix(norm_addr)
         
-        # BƯỚC 1: Dò tìm Tỉnh mới & Phường/Xã mới từ chuỗi Input
-        matched_rows = pd.DataFrame()
-        if not df.empty:
-            # Lọc các dòng khớp Tỉnh mới & Xã mới
-            matched_rows = df[
-                df['tinh_moi_core'].apply(lambda x: bool(x and x in addr_lower)) &
-                df['xa_moi_core'].apply(lambda x: bool(x and x in addr_lower))
-            ]
-            
-        # BƯỚC 2: Kiểm tra kết quả khớp Excel
-        if len(matched_rows) == 1:
-            # ✅ Nếu chỉ có 1 kết quả duy nhất -> Khớp 100%, không cần gọi AI!
-            row = matched_rows.iloc[0]
-            old_unit = f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}"
-            full_old = f"{street_prefix}, {old_unit}" if street_prefix else old_unit
-            res_obj = {"address": full_old, "confidence": "Cao"}
-            
-        elif len(matched_rows) > 1:
-            # ⚠️ Nếu Xã mới gộp từ nhiều Xã cũ -> Khoanh vùng đúng các dòng này cho AI phân xử
-            candidates = matched_rows[['Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].to_dict('records')
-            prompt = f"""
-            Địa chỉ MỚI: "{addr}"
-            Phần Tên đường/Số nhà/Ấp: "{street_prefix}"
-            
-            DANH SÁCH {len(candidates)} ĐƠN VỊ CŨ KHẢ THI TRONG EXCEL:
-            {json.dumps(candidates, ensure_ascii=False)}
-            
-            Hãy chọn ĐÚNG 1 đơn vị CŨ phù hợp nhất dựa trên tên đường/thôn/xóm.
-            Trả về JSON: {{"address": "[Số nhà/Đường], [Tên Xã cũ], [Huyện cũ], [Tỉnh cũ]", "confidence": "Cao" hoặc "Nghi ngờ"}}
-            """
-            try:
-                response = model.generate_content(prompt)
-                text_res = response.text.strip()
-                if text_res.startswith("```json"): text_res = text_res[7:-3].strip()
-                elif text_res.startswith("```"): text_res = text_res[3:-3].strip()
-                res_obj = json.loads(text_res)
-            except Exception:
-                row = matched_rows.iloc[0]
-                old_unit = f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}"
-                res_obj = {"address": f"{street_prefix}, {old_unit}" if street_prefix else old_unit, "confidence": "Nghi ngờ"}
+        # BƯỚC 3: DÒ EXCEL TÌM TỈNH VÀ XÃ TRONG CỘT TỈNH/XÃ MỚI
+        matched_records = []
+        for row in db_records:
+            # So sánh điểm lõi
+            xa_m_score = get_match_score(str(row['Tên Xã mới']), row['xa_moi_core'], norm_addr, PREFIX_XA_MAN)
+            if xa_m_score > 0:
+                tinh_m_score = get_match_score(str(row['Tỉnh mới']), row['tinh_moi_core'], norm_addr, PREFIX_TINH_MAN)
+                matched_records.append({'row': row, 'score': xa_m_score + tinh_m_score})
                 
+        # BƯỚC 4 & 5: DÒ RA ĐƠN VỊ CŨ & GHÉP NỐI VỚI SỐ NHÀ/ĐƯỜNG
+        if matched_records:
+            matched_records.sort(key=lambda x: x['score'], reverse=True)
+            top_score = matched_records[0]['score']
+            best_rows = [m['row'] for m in matched_records if m['score'] == top_score]
+            
+            # BƯỚC 6: LẤY LÀM PHẠM VI TÌM KIẾM CHO AI
+            # Trường hợp A: Dò khớp chính xác 1 dòng trong Excel ➔ Kết quả 100% tin cậy!
+            if len(best_rows) == 1:
+                r = best_rows[0]
+                old_unit = f"{r['Tên Xã cũ']}, {r['Huyện cũ']}, {r['Tỉnh cũ']}"
+                full_old = f"{street_prefix}, {old_unit}" if street_prefix else old_unit
+                res_obj = {"address": full_old, "confidence": "Cao"}
+                st.session_state.ai_cache[addr] = res_obj
+                results[addr] = res_obj
+                continue
+            else:
+                # Trường hợp B: Xã Mới gộp từ nhiều Xã CŨ ➔ Rút đúng tập dòng này khoanh vùng cho AI
+                context_candidates = [{'Tên Xã cũ': r['Tên Xã cũ'], 'Huyện cũ': r['Huyện cũ'], 'Tỉnh cũ': r['Tỉnh cũ']} for r in best_rows]
         else:
-            # ❌ Nếu không dò thấy Xã mới -> Chuyển sang Trạm cấp cứu
+            # Trường hợp C: Không khớp được Xã Mới (người dùng gõ lộn tên phường) ➔ Lấy mẫu theo Tỉnh
+            context_candidates = [{'Tên Xã cũ': r['Tên Xã cũ'], 'Huyện cũ': r['Huyện cũ'], 'Tỉnh cũ': r['Tỉnh cũ']} for r in db_records[:100]]
+
+        # BƯỚC 6 (TIẾP): TRUYỀN PHẠM VI KHOANH VÙNG BÓC TÁCH CHO AI LÀM TRỌNG TÀI
+        prompt = f"""
+        Bạn là hệ thống kiểm định địa giới hành chính.
+        Địa chỉ MỚI người dùng nhập: "{addr}"
+        Phần Số nhà/Đường/Thôn/Ấp bóc tách được: "{street_prefix}"
+
+        PHẠM VI ĐẮC ĐỊA BÓC TÁCH TỪ EXCEL (KHOANH VÙNG):
+        {json.dumps(context_candidates, ensure_ascii=False)}
+
+        NHIỆM VỤ:
+        1. Dựa vào tên Số nhà/Đường/Thôn/Ấp, chọn ĐÚNG 1 Đơn vị CŨ ("Tên Xã cũ", "Huyện cũ", "Tỉnh cũ") trong phạm vi khoanh vùng ở trên.
+        2. Ghép chuỗi hoàn chỉnh theo format: "[Số nhà/Đường/Thôn/Ấp], [Tên Xã cũ], [Huyện cũ], [Tỉnh cũ]".
+        3. Trả về JSON hợp lệ:
+           {{"address": "...", "confidence": "Cao" hoặc "Trung bình"}}
+        4. Nếu quá mâu thuẫn không thể chọn, trả về:
+           {{"address": "{addr}", "confidence": "Nghi ngờ"}}
+        """
+        
+        # BƯỚC 7: TRẢ VỀ KẾT QUẢ & GẮN NHÃN (KHÔNG TÌM ĐƯỢC MỚI TRẢ VỀ TRẠM CẤP CỨU)
+        try:
+            response = model.generate_content(prompt)
+            text_res = response.text.strip()
+            if text_res.startswith("```json"): text_res = text_res[7:-3].strip()
+            elif text_res.startswith("```"): text_res = text_res[3:-3].strip()
+            res_obj = json.loads(text_res)
+        except Exception:
             res_obj = {"address": addr, "confidence": "Nghi ngờ"}
             
         st.session_state.ai_cache[addr] = res_obj
@@ -268,7 +289,7 @@ st.markdown("### 📍 Công cụ Chuyển đổi Địa chỉ Hành chính")
 # MENU CẤP 1
 main_mode = option_menu(
     menu_title=None,
-    options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI + RAG)"],
+    options=["Chuyển CŨ ➡️ MỚI (Excel)", "Chuyển MỚI ➡️ CŨ (Trợ lý AI)"],
     icons=["rocket-takeoff", "robot"],
     orientation="horizontal",
     styles={
@@ -287,7 +308,7 @@ main_mode = option_menu(
 )
 
 # ------------------------------------------
-# PHÂN HỆ 1: CHUYỂN CŨ -> MỚI
+# PHÂN HỆ 1: CHUYỂN CŨ -> MỚI (GIỮ NGUYÊN 100%)
 # ------------------------------------------
 if "CŨ ➡️ MỚI" in main_mode:
     sub_mode_excel = option_menu(
@@ -354,7 +375,7 @@ if "CŨ ➡️ MỚI" in main_mode:
         else: st.info("Chưa có dữ liệu. Vui lòng chuyển đổi ở tab đầu tiên trước!")
 
 # ------------------------------------------
-# PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (THUẬT TOÁN BÓC TÁCH MỚI)
+# PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (QUY TRÌNH 7 BƯỚC)
 # ------------------------------------------
 else:
     with st.expander("🔑 Bảng cấu hình API Google Gemini", expanded=True):
@@ -375,7 +396,7 @@ else:
         icons=["cpu", "patch-exclamation", "download"],
         orientation="horizontal",
         styles={
-            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"},
+            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px"},
             "icon": {"font-size": "13px"},
             "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"},
             "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"},
@@ -390,7 +411,9 @@ else:
                 st.session_state.ai_cache = {}
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 model = genai.GenerativeModel(selected_model)
-                results = smart_ai_lookup(model, queries)
+                
+                with st.spinner("Đang thực hiện Bóc tách -> Dò Excel -> Khoanh vùng -> Gọi AI..."):
+                    results = smart_ai_lookup(model, queries)
                 
                 st.session_state.app_data_ai = []
                 for i, q in enumerate(queries):
@@ -409,13 +432,13 @@ else:
 
         if st.session_state.app_data_ai:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
-            st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ/chưa khớp Excel ➡️ Chọn tab 'Trạm cấp cứu AI' để xử lý)")
+            st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca chưa thể xác định ➡️ Chuyển sang 'Trạm cấp cứu AI' để xử lý thủ công)")
 
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
-        if not suspect_items: st.info("🎉 Tất cả địa chỉ đều đã được khớp nối chính xác!")
+        if not suspect_items: st.info("🎉 Tất cả địa chỉ đều đã được phân tích thành công!")
         else:
-            st.warning("Các địa chỉ dưới đây chưa được tự động khớp nối Excel. Bạn có thể chọn địa bàn MỚI chuẩn để xem Bảng tham chiếu các Xã CŨ tương ứng!")
+            st.warning("Các địa chỉ dưới đây không tìm thấy trong Excel hoặc mâu thuẫn dữ liệu. Bạn có thể chọn địa bàn MỚI chuẩn để xem Bảng tham chiếu các Xã CŨ tương ứng!")
             err_dict_ai = {i['id']: f"{i['old']} ➡️ [Dự đoán: {i['new']}]" for i in suspect_items}
             sel_id_ai = st.selectbox("Chọn địa chỉ cần cấp cứu/xác nhận:", options=list(err_dict_ai.keys()), format_func=lambda x: err_dict_ai[x], key="ai_err_select")
             sel_item_ai = next(i for i in st.session_state.app_data_ai if i['id'] == sel_id_ai)
