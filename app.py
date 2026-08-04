@@ -184,7 +184,6 @@ def extract_street_prefix(address_str):
     street_parts = []
     
     for p in parts:
-        # Nếu bắt gặp các từ khóa đơn vị hành chính thì dừng bóc tách
         if re.search(r'(?i)\b(phường|xã|thị trấn|quận|huyện|thành phố|tỉnh|p\.|x\.|tt\.|q\.|h\.|tp\.|t\.)\b', p) or \
            re.match(r'(?i)^(p|x|tt|q|h|tx|tp)\s*\d+', p):
             break
@@ -192,7 +191,6 @@ def extract_street_prefix(address_str):
         
     if street_parts:
         return ", ".join(street_parts)
-    # Nếu không tách được theo dấu phẩy, lấy phần tử đầu tiên làm mặc định
     return parts[0] if parts else ""
 
 # ==========================================
@@ -409,7 +407,7 @@ else:
             suspects = sum(1 for d in st.session_state.app_data_ai if d['is_error'])
             st.success(f"🎉 Đã phân tích xong {len(st.session_state.app_data_ai)} dòng. (Có {suspects} ca nghi ngờ ➡️ Chọn tab 'Trạm cấp cứu AI' để kiểm tra lại)")
 
-    # TRẠM CẤP CỨU AI: TỰ ĐỘNG BÓC TÁCH PREFIX VÀ GHÉP VỚI ĐƠN VỊ CỦ ĐƯỢC CHỌN
+    # TRẠM CẤP CỨU AI: FIX LỖI "KHÔNG NHẢY THEO PHƯỜNG"
     elif sub_mode_ai == "Trạm cấp cứu AI":
         suspect_items = [d for d in st.session_state.app_data_ai if d['is_error']]
         if not suspect_items: st.info("🎉 Tất cả địa chỉ đều có độ tin cậy Cao/Trung bình!")
@@ -441,20 +439,34 @@ else:
                 st.dataframe(matched_rows[['Tên Xã cũ', 'Huyện cũ', 'Tỉnh cũ']].reset_index(drop=True), use_container_width=True)
                 
                 old_options = [f"{row['Tên Xã cũ']}, {row['Huyện cũ']}, {row['Tỉnh cũ']}" for _, row in matched_rows.iterrows()]
-                selected_old_unit = st.selectbox("3. Chọn Đơn vị CŨ gốc chính xác cho địa chỉ này:", options=old_options, key="old_unit_select")
                 
-                # TỰ ĐỘNG BÓC TÁCH SỐ NHÀ/ĐƯỜNG/THÔN/XÓM TỪ ĐỊA CHỈ ĐẦU VÀO
+                # Hàm Callback tự động đẩy địa chỉ mới vào ô Text_Input ngay khi chọn Phường
+                def update_edit_text():
+                    selected_old = st.session_state.old_unit_select
+                    prefix = extract_street_prefix(sel_item_ai['old'])
+                    st.session_state.edit_ai_input = f"{prefix}, {selected_old}" if prefix else selected_old
+
+                selected_old_unit = st.selectbox(
+                    "3. Chọn Đơn vị CŨ gốc chính xác cho địa chỉ này:", 
+                    options=old_options, 
+                    key="old_unit_select",
+                    on_change=update_edit_text
+                )
+                
+                # Cởi tạo giá trị ban đầu nếu chưa có trong session_state
                 street_prefix = extract_street_prefix(sel_item_ai['old'])
+                default_val = f"{street_prefix}, {selected_old_unit}" if street_prefix else selected_old_unit
+                if "edit_ai_input" not in st.session_state:
+                    st.session_state.edit_ai_input = default_val
                 
-                # TỰ ĐỘNG GHÉP NỐI PREFIX VỚI ĐƠN VỊ CỦ CHỌN TỪ DROPDOWN
-                sug_addr_old = f"{street_prefix}, {selected_old_unit}" if street_prefix else selected_old_unit
-                
-                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn hoàn chỉnh (Đã tự động kết hợp):", value=sug_addr_old, key="edit_ai_input")
+                final_edit_ai = st.text_input("✍️ Địa chỉ CŨ chuẩn hoàn chỉnh (Đã tự động kết hợp):", key="edit_ai_input")
                 
                 if st.button("💾 Xác nhận lưu địa chỉ CŨ chuẩn này", type="primary", key="save_ai_fix"):
                     for d in st.session_state.app_data_ai:
                         if d['id'] == sel_id_ai:
                             d.update({'new': final_edit_ai, 'confidence': 'Đã xác nhận', 'is_error': False})
+                    # Xóa key để lượt cấp cứu sau không bị giữ giá trị cũ
+                    if "edit_ai_input" in st.session_state: del st.session_state.edit_ai_input
                     st.rerun()
 
     elif sub_mode_ai == "Trạm xuất dữ liệu":
