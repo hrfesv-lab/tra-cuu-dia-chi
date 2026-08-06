@@ -286,36 +286,102 @@ def convert_moi_to_cu_offline(query):
 # ==========================================
 # CÔNG CỤ DỊCH THUẬT TIẾNG ANH (TRANSLATOR)
 # ==========================================
+def remove_vn_accents(s):
+    """Hàm loại bỏ toàn bộ dấu tiếng Việt (Đồng Nai -> Dong Nai)"""
+    if not isinstance(s, str): return s
+    s = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', s)
+    s = re.sub(r'[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]', 'A', s)
+    s = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', s)
+    s = re.sub(r'[ÈÉẸẺẼÊỀẾỆỂỄ]', 'E', s)
+    s = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', s)
+    s = re.sub(r'[ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ]', 'O', s)
+    s = re.sub(r'[ìíịỉĩ]', 'i', s)
+    s = re.sub(r'[ÌÍỊỈĨ]', 'I', s)
+    s = re.sub(r'[ùúụủũưừứựửữ]', 'u', s)
+    s = re.sub(r'[ÙÚỤỦŨƯỪỨỰỬỮ]', 'U', s)
+    s = re.sub(r'[ỳýỵỷỹ]', 'y', s)
+    s = re.sub(r'[ỲÝỴỶỸ]', 'Y', s)
+    s = re.sub(r'[Đ]', 'D', s)
+    s = re.sub(r'[đ]', 'd', s)
+    return s
+
+def build_en_part(name, unit):
+    """Xử lý định dạng: Tên chữ ra trước (Dong Nai Province), số ra sau (Quarter 3)"""
+    if not name: return unit
+    if name[0].isdigit(): return f"{unit} {name}"
+    return f"{name} {unit}"
+
 def translate_addr_en(addr):
+    """Dịch toàn bộ địa chỉ sang Tiếng Anh (không dấu)"""
     if not isinstance(addr, str) or not addr: return addr
+    
+    # Bảo vệ các dòng cảnh báo để dịch sau
+    addr = addr.replace("[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*]", "SPECIAL_WARN_1")
+    addr = addr.replace("[*Không khớp CSDL*]", "SPECIAL_WARN_2")
+    
     parts = [p.strip() for p in addr.split(',')]
     en_parts = []
+    
     for p in parts:
+        if not p: continue
+        if p in ["SPECIAL_WARN_1", "SPECIAL_WARN_2"]:
+            en_parts.append(p)
+            continue
+            
         p_lower = p.lower()
-        if p_lower.startswith('tỉnh '): p = p[5:].strip() + ' Province'
+        if p_lower.startswith('tỉnh '): 
+            name = remove_vn_accents(p[5:].strip()).title()
+            en_parts.append(build_en_part(name, "Province"))
         elif p_lower.startswith('thành phố ') or p_lower.startswith('tp ') or p_lower.startswith('tp. '):
-            name = p_lower.replace('thành phố', '').replace('tp.', '').replace('tp', '').strip().title()
-            p = name + ' City'
+            raw_name = re.sub(r'^(thành phố|tp\.|tp)\s+', '', p, flags=re.IGNORECASE)
+            name = remove_vn_accents(raw_name.strip()).title()
+            en_parts.append(build_en_part(name, "City"))
         elif p_lower.startswith('quận '): 
-            name = p[5:].strip()
-            p = f'District {name}' if name.isdigit() else f'{name} District'
-        elif p_lower.startswith('huyện '): p = p[6:].strip() + ' District'
+            name = remove_vn_accents(p[5:].strip()).title()
+            en_parts.append(build_en_part(name, "District"))
+        elif p_lower.startswith('huyện '): 
+            name = remove_vn_accents(p[6:].strip()).title()
+            en_parts.append(build_en_part(name, "District"))
         elif p_lower.startswith('thị xã ') or p_lower.startswith('tx '): 
-            name = p_lower.replace('thị xã', '').replace('tx', '').strip().title()
-            p = name + ' Town'
+            raw_name = re.sub(r'^(thị xã|tx)\s+', '', p, flags=re.IGNORECASE)
+            name = remove_vn_accents(raw_name.strip()).title()
+            en_parts.append(build_en_part(name, "Town"))
         elif p_lower.startswith('phường '): 
-            name = p[7:].strip()
-            p = f'Ward {name}' if name.isdigit() else f'{name} Ward'
-        elif p_lower.startswith('xã '): p = p[3:].strip() + ' Commune'
-        elif p_lower.startswith('thị trấn '): p = p[9:].strip() + ' Town'
-        
-        # Translate special warnings inside address
-        p = p.replace("[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*]", "[*Please check old Ward/Commune on Gov website*]")
-        p = p.replace("[*Không khớp CSDL*]", "[*Not in Database*]")
-        en_parts.append(p)
-    return ', '.join(en_parts)
+            name = remove_vn_accents(p[7:].strip()).title()
+            en_parts.append(build_en_part(name, "Ward"))
+        elif p_lower.startswith('xã '): 
+            name = remove_vn_accents(p[3:].strip()).title()
+            en_parts.append(build_en_part(name, "Commune"))
+        elif p_lower.startswith('thị trấn ') or p_lower.startswith('tt '): 
+            raw_name = re.sub(r'^(thị trấn|tt)\s+', '', p, flags=re.IGNORECASE)
+            name = remove_vn_accents(raw_name.strip()).title()
+            en_parts.append(build_en_part(name, "Town"))
+        elif p_lower.startswith('khu phố ') or p_lower.startswith('kp '): 
+            raw_name = re.sub(r'^(khu phố|kp)\s+', '', p, flags=re.IGNORECASE)
+            name = remove_vn_accents(raw_name.strip()).title()
+            en_parts.append(build_en_part(name, "Quarter"))
+        elif p_lower.startswith('ấp '): 
+            name = remove_vn_accents(p[3:].strip()).title()
+            en_parts.append(build_en_part(name, "Hamlet"))
+        elif p_lower.startswith('thôn '): 
+            name = remove_vn_accents(p[5:].strip()).title()
+            en_parts.append(build_en_part(name, "Village"))
+        elif p_lower.startswith('đường '): 
+            name = remove_vn_accents(p[6:].strip()).title()
+            en_parts.append(build_en_part(name, "Street"))
+        elif p_lower.startswith('tổ '): 
+            name = remove_vn_accents(p[3:].strip()).title()
+            en_parts.append(build_en_part(name, "Group"))
+        else:
+            en_parts.append(remove_vn_accents(p).title())
+    
+    final_str = ', '.join(en_parts)
+    final_str = final_str.replace("SPECIAL_WARN_1", "[*Please check old Ward/Commune on Gov website*]")
+    final_str = final_str.replace("SPECIAL_WARN_2", "[*Not in Database*]")
+    return final_str
 
 def translate_note_en(note):
+    """Dịch Ghi chú & Trạng thái sang Tiếng Anh, khử luôn dấu tiếng Việt bên trong"""
     if not isinstance(note, str) or not note: return note
     replacements = {
         "✅ Lấy từ Từ điển": "✅ From Dictionary",
@@ -329,11 +395,20 @@ def translate_note_en(note):
         "Cảnh báo: Thiếu Xã/Phường": "Warning: Missing Ward/Commune",
         "Thành công": "Success",
         "Lỗi hệ thống": "System Error",
-        "Tách xã ➡️ Cần check lại": "Split Commune ➡️ Manual check needed"
+        "Tách xã ➡️ Cần check lại": "Split Commune ➡️ Manual check needed",
+        "Xã ": "Commune ",
+        "Phường ": "Ward ",
+        "Thị trấn ": "Town ",
+        "Quận ": "District ",
+        "Huyện ": "District ",
+        "Tỉnh ": "Province ",
+        "Thành phố ": "City "
     }
     for vi, en in replacements.items():
         note = note.replace(vi, en)
-    return note
+    
+    # Cuối cùng, khử toàn bộ dấu cho những từ như "Xuân Lộc" còn sót lại bên trong note
+    return remove_vn_accents(note)
 
 # ==========================================
 # 5. GIAO DIỆN CHÍNH
