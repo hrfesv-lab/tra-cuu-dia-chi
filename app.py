@@ -174,6 +174,18 @@ def auto_convert_address(query):
         xa_cu, xa_moi = str(row['Tên Xã cũ']), str(row['Tên Xã mới'])
         huyen_cu = str(row['Huyện cũ'])
         
+        # --- BỘ LỌC MỚI: PHÁT HIỆN 1 XÃ CŨ TÁCH LÀM NHIỀU XÃ MỚI ---
+        tap_hop_xa_moi = set()
+        for r in db_records:
+            if str(r['Tỉnh cũ']) == tinh_cu and str(r['Huyện cũ']) == huyen_cu and str(r['Tên Xã cũ']) == xa_cu:
+                tap_hop_xa_moi.add(str(r['Tên Xã mới']))
+        
+        # Nếu xã cũ này ánh xạ ra từ 2 xã mới trở lên -> Báo lỗi ngay lập tức
+        if len(tap_hop_xa_moi) > 1:
+            canh_bao = f"⚠️ Tách xã ➡️ Cần check lại ({', '.join(list(tap_hop_xa_moi))})"
+            return out_addr, canh_bao, True
+        # -----------------------------------------------------------
+        
         if get_match_score(tinh_cu, row['tinh_core'], query_search, PREFIX_TINH_MAN) > 0 and tinh_cu.lower() != tinh_moi.lower():
             out_addr = replace_part_smart(out_addr, tinh_cu, row['tinh_core'], tinh_moi, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
             notes.append(f"Tỉnh ➡️ {tinh_moi}")
