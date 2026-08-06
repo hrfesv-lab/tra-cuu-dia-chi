@@ -30,12 +30,11 @@ hide_st_style = """
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# Khởi tạo Session State
 if 'app_data_excel' not in st.session_state: st.session_state.app_data_excel = []
 if 'app_data_moi_cu' not in st.session_state: st.session_state.app_data_moi_cu = []
 
 # ==========================================
-# 2. HỆ THỐNG TỪ ĐIỂN SỬA TAY VĨNH VIỄN (2 CHIỀU)
+# 2. HỆ THỐNG TỪ ĐIỂN SỬA TAY VĨNH VIỄN
 # ==========================================
 DICT_CU_MOI = "Tu_Dien_Cu_Moi.json"
 DICT_MOI_CU = "Tu_Dien_Moi_Cu.json"
@@ -43,20 +42,15 @@ DICT_MOI_CU = "Tu_Dien_Moi_Cu.json"
 def load_dict(filepath):
     if os.path.exists(filepath):
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
+            with open(filepath, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return {}
     return {}
 
 def save_dict(d, filepath):
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False, indent=4)
+    with open(filepath, 'w', encoding='utf-8') as f: json.dump(d, f, ensure_ascii=False, indent=4)
 
-if 'dict_cu_moi' not in st.session_state:
-    st.session_state.dict_cu_moi = load_dict(DICT_CU_MOI)
-if 'dict_moi_cu' not in st.session_state:
-    st.session_state.dict_moi_cu = load_dict(DICT_MOI_CU)
+if 'dict_cu_moi' not in st.session_state: st.session_state.dict_cu_moi = load_dict(DICT_CU_MOI)
+if 'dict_moi_cu' not in st.session_state: st.session_state.dict_moi_cu = load_dict(DICT_MOI_CU)
 
 # ==========================================
 # 3. NẠP DỮ LIỆU EXCEL & CHUẨN HÓA LÕI
@@ -72,8 +66,7 @@ def load_data():
         df = df.dropna(subset=['Tên Xã cũ', 'Tên Xã mới'])
         def clean_code(text):
             if pd.isna(text): return ""
-            text = unicodedata.normalize('NFC', str(text))
-            return re.sub(r'\s*\(\d+\)', '', text).strip()
+            return re.sub(r'\s*\(\d+\)', '', unicodedata.normalize('NFC', str(text))).strip()
             
         df['Tên Xã cũ'] = df['Tên Xã cũ'].apply(clean_code)
         huyen_col = 'Quận/huyện cũ' if 'Quận/huyện cũ' in df.columns else 'Quận/huyện'
@@ -94,8 +87,7 @@ def load_data():
         df['tinh_moi_core_lower'] = df['tinh_moi_core'].astype(str).str.lower()
         
         return df, df.to_dict('records')
-    except Exception:
-        return pd.DataFrame(), []
+    except Exception: return pd.DataFrame(), []
 
 df, db_records = load_data()
 
@@ -149,7 +141,6 @@ def replace_part_smart(query, full_name, core_name, new_name, prefix_opt, prefix
     return query
 
 def auto_convert_address(query):
-    # ƯU TIÊN LẤY TỪ ĐIỂN SỬA TAY
     if query in st.session_state.dict_cu_moi:
         return st.session_state.dict_cu_moi[query]['new'], st.session_state.dict_cu_moi[query]['notes'], False
 
@@ -174,18 +165,15 @@ def auto_convert_address(query):
         xa_cu, xa_moi = str(row['Tên Xã cũ']), str(row['Tên Xã mới'])
         huyen_cu = str(row['Huyện cũ'])
         
-        # --- BỘ LỌC MỚI: PHÁT HIỆN 1 XÃ CŨ TÁCH LÀM NHIỀU XÃ MỚI ---
         tap_hop_xa_moi = set()
         for r in db_records:
             if str(r['Tỉnh cũ']) == tinh_cu and str(r['Huyện cũ']) == huyen_cu and str(r['Tên Xã cũ']) == xa_cu:
                 tap_hop_xa_moi.add(str(r['Tên Xã mới']))
         
-        # Nếu xã cũ này ánh xạ ra từ 2 xã mới trở lên -> Báo lỗi ngay lập tức
         if len(tap_hop_xa_moi) > 1:
             canh_bao = f"⚠️ Tách xã ➡️ Cần check lại ({', '.join(list(tap_hop_xa_moi))})"
             return out_addr, canh_bao, True
-        # -----------------------------------------------------------
-        
+            
         if get_match_score(tinh_cu, row['tinh_core'], query_search, PREFIX_TINH_MAN) > 0 and tinh_cu.lower() != tinh_moi.lower():
             out_addr = replace_part_smart(out_addr, tinh_cu, row['tinh_core'], tinh_moi, PREFIX_TINH_OPT, PREFIX_TINH_MAN)
             notes.append(f"Tỉnh ➡️ {tinh_moi}")
@@ -225,9 +213,6 @@ def force_convert_address(query, row):
     
     return re.sub(r',\s*,', ',', out_addr).strip(', ')
 
-# ==========================================
-# 4. THUẬT TOÁN MỚI -> CŨ (OFFLINE 100%)
-# ==========================================
 def extract_address_components(addr):
     if not addr: return "", "", "", ""
     parts = [p.strip() for p in addr.split(',') if p.strip()]
@@ -255,7 +240,6 @@ def extract_address_components(addr):
     return prefix, get_core_name(xa), get_core_name(huyen), get_core_name(tinh)
 
 def convert_moi_to_cu_offline(query):
-    # ƯU TIÊN LẤY TỪ ĐIỂN SỬA TAY
     if query in st.session_state.dict_moi_cu:
         return st.session_state.dict_moi_cu[query]['new'], st.session_state.dict_moi_cu[query]['notes'], False
 
@@ -271,8 +255,7 @@ def convert_moi_to_cu_offline(query):
         for row in db_records:
             if xa_in_lower == str(row.get('xa_moi_core_lower', '')):
                 score = 10
-                if tinh_in_lower and tinh_in_lower in str(row.get('tinh_moi_core_lower', '')):
-                    score += 5
+                if tinh_in_lower and tinh_in_lower in str(row.get('tinh_moi_core_lower', '')): score += 5
                 matched_records.append({'row': row, 'score': score})
                 
     if not matched_records and xa_in_lower:
@@ -280,8 +263,7 @@ def convert_moi_to_cu_offline(query):
             db_xa = str(row.get('xa_moi_core_lower', ''))
             if (len(xa_in_lower) >= 3 and xa_in_lower in db_xa) or (len(db_xa) >= 3 and db_xa in xa_in_lower):
                 score = 5
-                if tinh_in_lower and tinh_in_lower in str(row.get('tinh_moi_core_lower', '')):
-                    score += 5
+                if tinh_in_lower and tinh_in_lower in str(row.get('tinh_moi_core_lower', '')): score += 5
                 matched_records.append({'row': row, 'score': score})
                 
     if matched_records:
@@ -293,16 +275,65 @@ def convert_moi_to_cu_offline(query):
         
         if len(old_cands) == 1:
             ans = f"{prefix}, {old_cands[0]}" if prefix else old_cands[0]
-            ans = re.sub(r',\s*,', ',', ans).strip(', ')
-            return ans, "Thành công", False
+            return re.sub(r',\s*,', ',', ans).strip(', '), "Thành công", False
         else:
-            huyen_cu = best_rows[0]['Huyện cũ']
-            tinh_cu = best_rows[0]['Tỉnh cũ']
+            huyen_cu, tinh_cu = best_rows[0]['Huyện cũ'], best_rows[0]['Tỉnh cũ']
             ans = f"{prefix}, [*Vui lòng tra cứu Phường/Xã cũ tại web UBND*], {huyen_cu}, {tinh_cu}" if prefix else f"[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*], {huyen_cu}, {tinh_cu}"
-            ans = re.sub(r',\s*,', ',', ans).strip(', ')
-            return ans, "Cảnh báo: Thiếu Xã/Phường", True
+            return re.sub(r',\s*,', ',', ans).strip(', '), "Cảnh báo: Thiếu Xã/Phường", True
     else:
         return f"{query} ➡️ [*Không khớp CSDL*]", "Lỗi hệ thống", True
+
+# ==========================================
+# CÔNG CỤ DỊCH THUẬT TIẾNG ANH (TRANSLATOR)
+# ==========================================
+def translate_addr_en(addr):
+    if not isinstance(addr, str) or not addr: return addr
+    parts = [p.strip() for p in addr.split(',')]
+    en_parts = []
+    for p in parts:
+        p_lower = p.lower()
+        if p_lower.startswith('tỉnh '): p = p[5:].strip() + ' Province'
+        elif p_lower.startswith('thành phố ') or p_lower.startswith('tp ') or p_lower.startswith('tp. '):
+            name = p_lower.replace('thành phố', '').replace('tp.', '').replace('tp', '').strip().title()
+            p = name + ' City'
+        elif p_lower.startswith('quận '): 
+            name = p[5:].strip()
+            p = f'District {name}' if name.isdigit() else f'{name} District'
+        elif p_lower.startswith('huyện '): p = p[6:].strip() + ' District'
+        elif p_lower.startswith('thị xã ') or p_lower.startswith('tx '): 
+            name = p_lower.replace('thị xã', '').replace('tx', '').strip().title()
+            p = name + ' Town'
+        elif p_lower.startswith('phường '): 
+            name = p[7:].strip()
+            p = f'Ward {name}' if name.isdigit() else f'{name} Ward'
+        elif p_lower.startswith('xã '): p = p[3:].strip() + ' Commune'
+        elif p_lower.startswith('thị trấn '): p = p[9:].strip() + ' Town'
+        
+        # Translate special warnings inside address
+        p = p.replace("[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*]", "[*Please check old Ward/Commune on Gov website*]")
+        p = p.replace("[*Không khớp CSDL*]", "[*Not in Database*]")
+        en_parts.append(p)
+    return ', '.join(en_parts)
+
+def translate_note_en(note):
+    if not isinstance(note, str) or not note: return note
+    replacements = {
+        "✅ Lấy từ Từ điển": "✅ From Dictionary",
+        "Cần sửa tay (Từ điển)": "Manual fix required",
+        "Cần sửa tay": "Manual fix required",
+        "Cần cập nhật Từ điển": "Update Dictionary required",
+        "Bỏ Huyện": "Removed District",
+        "Tỉnh ➡️": "Province ➡️",
+        "Xã ➡️": "Commune ➡️",
+        "Lỗi/Không tìm thấy vị trí": "Error/Location not found",
+        "Cảnh báo: Thiếu Xã/Phường": "Warning: Missing Ward/Commune",
+        "Thành công": "Success",
+        "Lỗi hệ thống": "System Error",
+        "Tách xã ➡️ Cần check lại": "Split Commune ➡️ Manual check needed"
+    }
+    for vi, en in replacements.items():
+        note = note.replace(vi, en)
+    return note
 
 # ==========================================
 # 5. GIAO DIỆN CHÍNH
@@ -317,15 +348,8 @@ main_mode = option_menu(
     styles={
         "container": {"padding": "4px", "background-color": "#f1f3f5", "border-radius": "12px", "margin-bottom": "15px"},
         "icon": {"color": "#495057", "font-size": "15px"},
-        "nav-link": {
-            "font-size": "14px", "font-weight": "600", "color": "#495057", 
-            "border-radius": "8px", "padding": "8px 20px", "margin": "0px 4px",
-            "--hover-color": "#e9ecef"
-        },
-        "nav-link-selected": {
-            "background-color": "#ffffff", "color": "#0d6efd", "font-weight": "700",
-            "box-shadow": "0px 2px 6px rgba(0,0,0,0.08)"
-        },
+        "nav-link": {"font-size": "14px", "font-weight": "600", "color": "#495057", "border-radius": "8px", "padding": "8px 20px", "margin": "0px 4px", "--hover-color": "#e9ecef"},
+        "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "700", "box-shadow": "0px 2px 6px rgba(0,0,0,0.08)"},
     }
 )
 
@@ -338,12 +362,7 @@ if "CŨ ➡️ MỚI" in main_mode:
         options=["Chuyển đổi hàng loạt", "Trạm vá lỗi dữ liệu", "Trạm xuất dữ liệu"],
         icons=["cloud-upload", "tools", "download"],
         orientation="horizontal",
-        styles={
-            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"},
-            "icon": {"font-size": "13px"},
-            "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"},
-            "nav-link-selected": {"background-color": "#ffffff", "color": "#198754", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"},
-        }
+        styles={"container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"}, "icon": {"font-size": "13px"}, "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"}, "nav-link-selected": {"background-color": "#ffffff", "color": "#198754", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"}}
     )
 
     if sub_mode_excel == "Chuyển đổi hàng loạt":
@@ -406,29 +425,41 @@ if "CŨ ➡️ MỚI" in main_mode:
             st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!")
         else:
             st.markdown("##### 🚨 Bảng kiểm tra và Xuất dữ liệu")
-            st.write("Lướt bảng, nếu thấy dòng nào sai (Tách xã, mâu thuẫn), hãy **Tích vào ô vuông 🚨 Cấp cứu** rồi bấm nút bên dưới bảng.")
+            
+            # --- CHỌN NGÔN NGỮ ---
+            lang_excel = st.radio("🌍 Chọn ngôn ngữ xuất dữ liệu / Select Export Language:", ["Tiếng Việt", "English"], horizontal=True)
+            
+            st.write("Lướt bảng, nếu thấy dòng nào sai (Tách xã, mâu thuẫn), hãy **Tích vào ô vuông 🚨 Cấp cứu / Fix** rồi bấm nút đẩy bên dưới bảng.")
             
             df_show = pd.DataFrame(st.session_state.app_data_excel)
-            if '🚨 Cấp cứu' not in df_show.columns:
-                df_show.insert(0, '🚨 Cấp cứu', False)
-                
+            if '🚨 Cấp cứu' not in df_show.columns: df_show.insert(0, '🚨 Cấp cứu', False)
             cols = ['🚨 Cấp cứu', 'id', 'old', 'new', 'notes', 'is_error']
-            edited_df = st.data_editor(
-                df_show[cols], 
-                column_config={
+            df_display = df_show[cols].copy()
+            
+            if lang_excel == "English":
+                df_display['old'] = df_display['old'].apply(translate_addr_en)
+                df_display['new'] = df_display['new'].apply(translate_addr_en)
+                df_display['notes'] = df_display['notes'].apply(translate_note_en)
+                col_config = {
+                    "🚨 Cấp cứu": st.column_config.CheckboxColumn("🚨 Fix", default=False),
+                    "old": "Original Address",
+                    "new": "Converted Address",
+                    "notes": "Notes",
+                }
+            else:
+                col_config = {
                     "🚨 Cấp cứu": st.column_config.CheckboxColumn("🚨 Cấp cứu", default=False),
                     "old": "Địa chỉ Gốc",
                     "new": "Kết quả",
                     "notes": "Ghi chú",
-                },
-                disabled=['id', 'old', 'new', 'notes', 'is_error'],
-                hide_index=True,
-                use_container_width=True
-            )
+                }
+
+            edited_df = st.data_editor(df_display, column_config=col_config, disabled=['id', 'old', 'new', 'notes', 'is_error'], hide_index=True, use_container_width=True)
             
             c1, c2 = st.columns([1, 3])
             with c1:
-                if st.button("🛠️ Đẩy các dòng tích về Trạm Vá", type="secondary"):
+                btn_push = "🛠️ Đẩy các dòng tích về Trạm Vá" if lang_excel == "Tiếng Việt" else "🛠️ Push selected to Fix Station"
+                if st.button(btn_push, type="secondary"):
                     count_pushed = 0
                     for index, row in edited_df.iterrows():
                         if row['🚨 Cấp cứu']:
@@ -438,21 +469,38 @@ if "CŨ ➡️ MỚI" in main_mode:
                                     item['notes'] = "Cần sửa tay"
                                     count_pushed += 1
                     if count_pushed > 0:
-                        st.success(f"✅ Đã đẩy {count_pushed} dòng về diện cần sửa thủ công!")
+                        st.success(f"✅ Đã đẩy {count_pushed} dòng về diện cần sửa thủ công!" if lang_excel == "Tiếng Việt" else f"✅ Pushed {count_pushed} rows for manual fix!")
                         st.rerun()
             with c2:
-                csv_data = pd.DataFrame(st.session_state.app_data_excel)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Gốc', 'new': 'Địa chỉ Mới', 'notes': 'Ghi chú'}).to_csv(index=False, encoding='utf-8-sig')
-                st.download_button("📥 TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="ChuyenDoi_Excel_Clean.csv", mime="text/csv", type="primary")
-                
-            # --- TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN ---
-            with st.expander("📂 Quản lý Từ Điển Hệ Thống (Các ca đã sửa tay)"):
+                if lang_excel == "English":
+                    csv_df = df_display[['old', 'new', 'notes']].rename(columns={'old': 'Original Address', 'new': 'Converted Address', 'notes': 'Notes'})
+                    btn_dl, fname = "📥 DOWNLOAD CSV FILE", "Converted_Excel_EN.csv"
+                else:
+                    csv_df = df_display[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Gốc', 'new': 'Địa chỉ Mới', 'notes': 'Ghi chú'})
+                    btn_dl, fname = "📥 TẢI FILE KẾT QUẢ CSV", "ChuyenDoi_Excel_Clean.csv"
+                    
+                csv_data = csv_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(btn_dl, data=csv_data, file_name=fname, mime="text/csv", type="primary")
+
+            # --- QUẢN LÝ TỪ ĐIỂN ---
+            expander_title = "📂 Quản lý Từ Điển (Các ca đã sửa tay)" if lang_excel == "Tiếng Việt" else "📂 Dictionary Management (Manual fixes)"
+            with st.expander(expander_title):
                 if st.session_state.dict_cu_moi:
-                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_cu_moi, orient='index').reset_index().rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_cu_moi, orient='index').reset_index()
+                    if lang_excel == "English":
+                        dict_df['index'] = dict_df['index'].apply(translate_addr_en)
+                        dict_df['new'] = dict_df['new'].apply(translate_addr_en)
+                        dict_df['notes'] = dict_df['notes'].apply(translate_note_en)
+                        dict_df = dict_df.rename(columns={'index': 'Original Address', 'new': 'Fixed Address', 'notes': 'Status'})
+                    else:
+                        dict_df = dict_df.rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                    
                     st.dataframe(dict_df, use_container_width=True)
                     dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button("⬇️ Tải file Từ Điển (CSV)", data=dict_csv, file_name="TuDien_Cu_Moi.csv", mime="text/csv")
+                    dl_btn = "⬇️ Tải file Từ Điển (CSV)" if lang_excel == "Tiếng Việt" else "⬇️ Download Dictionary (CSV)"
+                    st.download_button(dl_btn, data=dict_csv, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.csv", mime="text/csv")
                 else:
-                    st.info("Từ điển hiện đang trống.")
+                    st.info("Từ điển hiện đang trống." if lang_excel == "Tiếng Việt" else "Dictionary is empty.")
 
 # ------------------------------------------
 # PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (OFFLINE 100%)
@@ -463,12 +511,7 @@ else:
         options=["Chuyển đổi hàng loạt", "Trạm vá lỗi dữ liệu", "Trạm xuất dữ liệu"],
         icons=["lightning", "tools", "download"],
         orientation="horizontal",
-        styles={
-            "container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px"},
-            "icon": {"font-size": "13px"},
-            "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"},
-            "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"},
-        }
+        styles={"container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px"}, "icon": {"font-size": "13px"}, "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"}, "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"}}
     )
 
     if sub_mode_ai == "Chuyển đổi hàng loạt":
@@ -478,17 +521,10 @@ else:
             if input_text_ai.strip():
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 st.session_state.app_data_moi_cu = []
-                
                 bar = st.progress(0)
                 for i, q in enumerate(queries):
                     ans, conf, is_err = convert_moi_to_cu_offline(q)
-                    st.session_state.app_data_moi_cu.append({
-                        'id': i, 
-                        'old': q, 
-                        'new': ans, 
-                        'confidence': conf,
-                        'is_error': is_err
-                    })
+                    st.session_state.app_data_moi_cu.append({'id': i, 'old': q, 'new': ans, 'confidence': conf, 'is_error': is_err})
                     bar.progress((i + 1) / len(queries))
                 st.rerun()
 
@@ -542,29 +578,41 @@ else:
             st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!")
         else:
             st.markdown("##### 🚨 Bảng kiểm tra và Xuất dữ liệu (MỚI ➡️ CŨ)")
-            st.write("Lướt bảng, nếu thấy Cảnh báo hoặc sai sót, hãy **Tích vào ô vuông 🚨 Cấp cứu** rồi bấm nút đẩy về Trạm Vá.")
+            
+            # --- CHỌN NGÔN NGỮ ---
+            lang_ai = st.radio("🌍 Chọn ngôn ngữ xuất dữ liệu / Select Export Language:", ["Tiếng Việt", "English"], horizontal=True)
+            
+            st.write("Lướt bảng, nếu thấy Cảnh báo hoặc sai sót, hãy **Tích vào ô vuông 🚨 Cấp cứu / Fix** rồi bấm nút đẩy về Trạm Vá.")
             
             df_show = pd.DataFrame(st.session_state.app_data_moi_cu)
-            if '🚨 Cấp cứu' not in df_show.columns:
-                df_show.insert(0, '🚨 Cấp cứu', False)
-                
+            if '🚨 Cấp cứu' not in df_show.columns: df_show.insert(0, '🚨 Cấp cứu', False)
             cols = ['🚨 Cấp cứu', 'id', 'old', 'new', 'confidence', 'is_error']
-            edited_df = st.data_editor(
-                df_show[cols], 
-                column_config={
+            df_display = df_show[cols].copy()
+            
+            if lang_ai == "English":
+                df_display['old'] = df_display['old'].apply(translate_addr_en)
+                df_display['new'] = df_display['new'].apply(translate_addr_en)
+                df_display['confidence'] = df_display['confidence'].apply(translate_note_en)
+                col_config = {
+                    "🚨 Cấp cứu": st.column_config.CheckboxColumn("🚨 Fix", default=False),
+                    "old": "Input Address (New)",
+                    "new": "Old Address (Result)",
+                    "confidence": "Status",
+                }
+            else:
+                col_config = {
                     "🚨 Cấp cứu": st.column_config.CheckboxColumn("🚨 Cấp cứu", default=False),
                     "old": "Địa chỉ MỚI (Đầu vào)",
                     "new": "Địa chỉ CŨ (Kết quả)",
                     "confidence": "Trạng thái",
-                },
-                disabled=['id', 'old', 'new', 'confidence', 'is_error'],
-                hide_index=True,
-                use_container_width=True
-            )
+                }
+
+            edited_df = st.data_editor(df_display, column_config=col_config, disabled=['id', 'old', 'new', 'confidence', 'is_error'], hide_index=True, use_container_width=True)
             
             c1, c2 = st.columns([1, 3])
             with c1:
-                if st.button("🛠️ Đẩy các dòng tích về Trạm Vá", type="secondary"):
+                btn_push = "🛠️ Đẩy các dòng tích về Trạm Vá" if lang_ai == "Tiếng Việt" else "🛠️ Push selected to Fix Station"
+                if st.button(btn_push, type="secondary"):
                     count_pushed = 0
                     for index, row in edited_df.iterrows():
                         if row['🚨 Cấp cứu']:
@@ -574,18 +622,35 @@ else:
                                     item['confidence'] = "Cần cập nhật Từ điển"
                                     count_pushed += 1
                     if count_pushed > 0:
-                        st.success(f"✅ Đã đẩy {count_pushed} dòng về diện cần sửa thủ công!")
+                        st.success(f"✅ Đã đẩy {count_pushed} dòng về diện cần sửa thủ công!" if lang_ai == "Tiếng Việt" else f"✅ Pushed {count_pushed} rows for manual fix!")
                         st.rerun()
             with c2:
-                csv_data = pd.DataFrame(st.session_state.app_data_moi_cu)[['old', 'new', 'confidence']].rename(columns={'old': 'Địa chỉ MỚI', 'new': 'Địa chỉ CŨ', 'confidence': 'Trạng thái'}).to_csv(index=False, encoding='utf-8-sig')
-                st.download_button("📥 TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="Ket_Qua_Moi_Cu.csv", mime="text/csv", type="primary")
+                if lang_ai == "English":
+                    csv_df = df_display[['old', 'new', 'confidence']].rename(columns={'old': 'New Address', 'new': 'Old Address', 'confidence': 'Status'})
+                    btn_dl, fname = "📥 DOWNLOAD CSV FILE", "Converted_Moi_Cu_EN.csv"
+                else:
+                    csv_df = df_display[['old', 'new', 'confidence']].rename(columns={'old': 'Địa chỉ MỚI', 'new': 'Địa chỉ CŨ', 'confidence': 'Trạng thái'})
+                    btn_dl, fname = "📥 TẢI FILE KẾT QUẢ CSV", "Ket_Qua_Moi_Cu.csv"
+                    
+                csv_data = csv_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(btn_dl, data=csv_data, file_name=fname, mime="text/csv", type="primary")
 
-            # --- TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN ---
-            with st.expander("📂 Quản lý Từ Điển Hệ Thống (Các ca đã sửa tay)"):
+            # --- QUẢN LÝ TỪ ĐIỂN ---
+            expander_title = "📂 Quản lý Từ Điển (Các ca đã cập nhật)" if lang_ai == "Tiếng Việt" else "📂 Dictionary Management (Manual fixes)"
+            with st.expander(expander_title):
                 if st.session_state.dict_moi_cu:
-                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_moi_cu, orient='index').reset_index().rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_moi_cu, orient='index').reset_index()
+                    if lang_ai == "English":
+                        dict_df['index'] = dict_df['index'].apply(translate_addr_en)
+                        dict_df['new'] = dict_df['new'].apply(translate_addr_en)
+                        dict_df['notes'] = dict_df['notes'].apply(translate_note_en)
+                        dict_df = dict_df.rename(columns={'index': 'Input Address', 'new': 'Fixed Old Address', 'notes': 'Status'})
+                    else:
+                        dict_df = dict_df.rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                        
                     st.dataframe(dict_df, use_container_width=True)
                     dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button("⬇️ Tải file Từ Điển (CSV)", data=dict_csv, file_name="TuDien_Moi_Cu.csv", mime="text/csv")
+                    dl_btn = "⬇️ Tải file Từ Điển (CSV)" if lang_ai == "Tiếng Việt" else "⬇️ Download Dictionary (CSV)"
+                    st.download_button(dl_btn, data=dict_csv, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.csv", mime="text/csv")
                 else:
-                    st.info("Từ điển hiện đang trống.")
+                    st.info("Từ điển hiện đang trống." if lang_ai == "Tiếng Việt" else "Dictionary is empty.")
