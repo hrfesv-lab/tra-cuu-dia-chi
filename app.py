@@ -4,6 +4,7 @@ import re
 import unicodedata
 import os
 import json
+import io
 from streamlit_option_menu import option_menu
 import time
 
@@ -287,7 +288,6 @@ def convert_moi_to_cu_offline(query):
 # CÔNG CỤ DỊCH THUẬT TIẾNG ANH (TRANSLATOR)
 # ==========================================
 def remove_vn_accents(s):
-    """Hàm loại bỏ toàn bộ dấu tiếng Việt (Đồng Nai -> Dong Nai)"""
     if not isinstance(s, str): return s
     s = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', s)
     s = re.sub(r'[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]', 'A', s)
@@ -306,16 +306,13 @@ def remove_vn_accents(s):
     return s
 
 def build_en_part(name, unit):
-    """Xử lý định dạng: Tên chữ ra trước (Dong Nai Province), số ra sau (Quarter 3)"""
     if not name: return unit
     if name[0].isdigit(): return f"{unit} {name}"
     return f"{name} {unit}"
 
 def translate_addr_en(addr):
-    """Dịch toàn bộ địa chỉ sang Tiếng Anh (không dấu)"""
     if not isinstance(addr, str) or not addr: return addr
     
-    # Bảo vệ các dòng cảnh báo để dịch sau
     addr = addr.replace("[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*]", "SPECIAL_WARN_1")
     addr = addr.replace("[*Không khớp CSDL*]", "SPECIAL_WARN_2")
     
@@ -381,7 +378,6 @@ def translate_addr_en(addr):
     return final_str
 
 def translate_note_en(note):
-    """Dịch Ghi chú & Trạng thái sang Tiếng Anh, khử luôn dấu tiếng Việt bên trong"""
     if not isinstance(note, str) or not note: return note
     replacements = {
         "✅ Lấy từ Từ điển": "✅ From Dictionary",
@@ -406,8 +402,6 @@ def translate_note_en(note):
     }
     for vi, en in replacements.items():
         note = note.replace(vi, en)
-    
-    # Cuối cùng, khử toàn bộ dấu cho những từ như "Xuân Lộc" còn sót lại bên trong note
     return remove_vn_accents(note)
 
 # ==========================================
@@ -470,19 +464,20 @@ if "CŨ ➡️ MỚI" in main_mode:
             
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].astype(str).dropna().unique().tolist()) if not df.empty else []
-            tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list)
+            # Thêm key động (sel_id) để Streamlit ép các ô chọn reset khi đổi qua địa chỉ khác
+            tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list, key=f"t_cu_{sel_id}")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
                 huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
-                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + huyen_list)
+                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + huyen_list, key=f"h_cu_{sel_id}")
                 if huyen_sel != "-- Chọn --":
                     xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
-                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + xa_list)
+                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + xa_list, key=f"x_cu_{sel_id}")
             
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
                 sug_addr = force_convert_address(sel_item['old'], exact_row)
-                final_edit = st.text_input("✍️ Chỉnh sửa lần cuối:", value=sug_addr)
+                final_edit = st.text_input("✍️ Chỉnh sửa lần cuối:", value=sug_addr, key=f"e_cu_{sel_id}")
                 
                 if st.button("💾 Lưu kết quả & Nạp vào Từ điển", type="primary"):
                     for d in st.session_state.app_data_excel:
@@ -501,7 +496,6 @@ if "CŨ ➡️ MỚI" in main_mode:
         else:
             st.markdown("##### 🚨 Bảng kiểm tra và Xuất dữ liệu")
             
-            # --- CHỌN NGÔN NGỮ ---
             lang_excel = st.radio("🌍 Chọn ngôn ngữ xuất dữ liệu / Select Export Language:", ["Tiếng Việt", "English"], horizontal=True)
             
             st.write("Lướt bảng, nếu thấy dòng nào sai (Tách xã, mâu thuẫn), hãy **Tích vào ô vuông 🚨 Cấp cứu / Fix** rồi bấm nút đẩy bên dưới bảng.")
@@ -531,7 +525,7 @@ if "CŨ ➡️ MỚI" in main_mode:
 
             edited_df = st.data_editor(df_display, column_config=col_config, disabled=['id', 'old', 'new', 'notes', 'is_error'], hide_index=True, use_container_width=True)
             
-            c1, c2 = st.columns([1, 3])
+            c1, c2 = st.columns([1, 2])
             with c1:
                 btn_push = "🛠️ Đẩy các dòng tích về Trạm Vá" if lang_excel == "Tiếng Việt" else "🛠️ Push selected to Fix Station"
                 if st.button(btn_push, type="secondary"):
@@ -549,13 +543,24 @@ if "CŨ ➡️ MỚI" in main_mode:
             with c2:
                 if lang_excel == "English":
                     csv_df = df_display[['old', 'new', 'notes']].rename(columns={'old': 'Original Address', 'new': 'Converted Address', 'notes': 'Notes'})
-                    btn_dl, fname = "📥 DOWNLOAD CSV FILE", "Converted_Excel_EN.csv"
+                    btn_csv, btn_xls = "📥 DOWNLOAD CSV", "📥 DOWNLOAD EXCEL"
+                    fname_csv, fname_xls = "Converted_Excel_EN.csv", "Converted_Excel_EN.xlsx"
                 else:
                     csv_df = df_display[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Gốc', 'new': 'Địa chỉ Mới', 'notes': 'Ghi chú'})
-                    btn_dl, fname = "📥 TẢI FILE KẾT QUẢ CSV", "ChuyenDoi_Excel_Clean.csv"
+                    btn_csv, btn_xls = "📥 TẢI FILE CSV", "📥 TẢI FILE EXCEL"
+                    fname_csv, fname_xls = "ChuyenDoi_Excel.csv", "ChuyenDoi_Excel.xlsx"
                     
                 csv_data = csv_df.to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(btn_dl, data=csv_data, file_name=fname, mime="text/csv", type="primary")
+                
+                # Tạo bộ đệm Excel ảo
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    csv_df.to_excel(writer, index=False)
+                excel_data = excel_buffer.getvalue()
+                
+                d1, d2 = st.columns(2)
+                d1.download_button(btn_csv, data=csv_data, file_name=fname_csv, mime="text/csv", type="primary", use_container_width=True)
+                d2.download_button(btn_xls, data=excel_data, file_name=fname_xls, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
             # --- QUẢN LÝ TỪ ĐIỂN ---
             expander_title = "📂 Quản lý Từ Điển (Các ca đã sửa tay)" if lang_excel == "Tiếng Việt" else "📂 Dictionary Management (Manual fixes)"
@@ -572,8 +577,15 @@ if "CŨ ➡️ MỚI" in main_mode:
                     
                     st.dataframe(dict_df, use_container_width=True)
                     dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
-                    dl_btn = "⬇️ Tải file Từ Điển (CSV)" if lang_excel == "Tiếng Việt" else "⬇️ Download Dictionary (CSV)"
-                    st.download_button(dl_btn, data=dict_csv, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.csv", mime="text/csv")
+                    
+                    dict_xls_buffer = io.BytesIO()
+                    with pd.ExcelWriter(dict_xls_buffer, engine='openpyxl') as writer:
+                        dict_df.to_excel(writer, index=False)
+                    dict_xls_data = dict_xls_buffer.getvalue()
+                    
+                    dl_d1, dl_d2 = st.columns(2)
+                    dl_d1.download_button("⬇️ CSV" if lang_excel == "English" else "⬇️ Tải CSV", data=dict_csv, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.csv", mime="text/csv", use_container_width=True)
+                    dl_d2.download_button("⬇️ EXCEL" if lang_excel == "English" else "⬇️ Tải EXCEL", data=dict_xls_data, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 else:
                     st.info("Từ điển hiện đang trống." if lang_excel == "Tiếng Việt" else "Dictionary is empty.")
 
@@ -621,21 +633,22 @@ else:
             st.write("Bạn hãy chọn đơn vị hành chính **CŨ** chuẩn xác cho địa chỉ này:")
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].astype(str).dropna().unique().tolist()) if not df.empty else []
-            tinh_sel = c1.selectbox("Tỉnh/Thành CŨ", ["-- Chọn --"] + tinh_list)
+            # Thêm key động (sel_id)
+            tinh_sel = c1.selectbox("Tỉnh/Thành CŨ", ["-- Chọn --"] + tinh_list, key=f"t_mc_{sel_id}")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
                 huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
-                huyen_sel = c2.selectbox("Quận/Huyện CŨ", ["-- Chọn --"] + huyen_list)
+                huyen_sel = c2.selectbox("Quận/Huyện CŨ", ["-- Chọn --"] + huyen_list, key=f"h_mc_{sel_id}")
                 if huyen_sel != "-- Chọn --":
                     xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
-                    xa_sel = c3.selectbox("Phường/Xã CŨ", ["-- Chọn --"] + xa_list)
+                    xa_sel = c3.selectbox("Phường/Xã CŨ", ["-- Chọn --"] + xa_list, key=f"x_mc_{sel_id}")
             
             if xa_sel != "-- Chọn --":
                 prefix, _, _, _ = extract_address_components(normalize_for_search(normalize_formatting(sel_item['old'])))
                 suggested_addr = f"{prefix}, {xa_sel}, {huyen_sel}, {tinh_sel}" if prefix else f"{xa_sel}, {huyen_sel}, {tinh_sel}"
                 suggested_addr = re.sub(r',\s*,', ',', suggested_addr).strip(', ')
                 
-                final_edit = st.text_input("✍️ Chỉnh sửa địa chỉ CŨ hoàn chỉnh:", value=suggested_addr)
+                final_edit = st.text_input("✍️ Chỉnh sửa địa chỉ CŨ hoàn chỉnh:", value=suggested_addr, key=f"e_mc_{sel_id}")
                 
                 if st.button("💾 Lưu kết quả & Nạp vào Từ điển", type="primary"):
                     for d in st.session_state.app_data_moi_cu:
@@ -654,7 +667,6 @@ else:
         else:
             st.markdown("##### 🚨 Bảng kiểm tra và Xuất dữ liệu (MỚI ➡️ CŨ)")
             
-            # --- CHỌN NGÔN NGỮ ---
             lang_ai = st.radio("🌍 Chọn ngôn ngữ xuất dữ liệu / Select Export Language:", ["Tiếng Việt", "English"], horizontal=True)
             
             st.write("Lướt bảng, nếu thấy Cảnh báo hoặc sai sót, hãy **Tích vào ô vuông 🚨 Cấp cứu / Fix** rồi bấm nút đẩy về Trạm Vá.")
@@ -684,7 +696,7 @@ else:
 
             edited_df = st.data_editor(df_display, column_config=col_config, disabled=['id', 'old', 'new', 'confidence', 'is_error'], hide_index=True, use_container_width=True)
             
-            c1, c2 = st.columns([1, 3])
+            c1, c2 = st.columns([1, 2])
             with c1:
                 btn_push = "🛠️ Đẩy các dòng tích về Trạm Vá" if lang_ai == "Tiếng Việt" else "🛠️ Push selected to Fix Station"
                 if st.button(btn_push, type="secondary"):
@@ -702,13 +714,24 @@ else:
             with c2:
                 if lang_ai == "English":
                     csv_df = df_display[['old', 'new', 'confidence']].rename(columns={'old': 'New Address', 'new': 'Old Address', 'confidence': 'Status'})
-                    btn_dl, fname = "📥 DOWNLOAD CSV FILE", "Converted_Moi_Cu_EN.csv"
+                    btn_csv, btn_xls = "📥 DOWNLOAD CSV", "📥 DOWNLOAD EXCEL"
+                    fname_csv, fname_xls = "Converted_Moi_Cu_EN.csv", "Converted_Moi_Cu_EN.xlsx"
                 else:
                     csv_df = df_display[['old', 'new', 'confidence']].rename(columns={'old': 'Địa chỉ MỚI', 'new': 'Địa chỉ CŨ', 'confidence': 'Trạng thái'})
-                    btn_dl, fname = "📥 TẢI FILE KẾT QUẢ CSV", "Ket_Qua_Moi_Cu.csv"
+                    btn_csv, btn_xls = "📥 TẢI FILE CSV", "📥 TẢI FILE EXCEL"
+                    fname_csv, fname_xls = "Ket_Qua_Moi_Cu.csv", "Ket_Qua_Moi_Cu.xlsx"
                     
                 csv_data = csv_df.to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(btn_dl, data=csv_data, file_name=fname, mime="text/csv", type="primary")
+                
+                # Tạo bộ đệm Excel ảo
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    csv_df.to_excel(writer, index=False)
+                excel_data = excel_buffer.getvalue()
+                
+                d1, d2 = st.columns(2)
+                d1.download_button(btn_csv, data=csv_data, file_name=fname_csv, mime="text/csv", type="primary", use_container_width=True)
+                d2.download_button(btn_xls, data=excel_data, file_name=fname_xls, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
             # --- QUẢN LÝ TỪ ĐIỂN ---
             expander_title = "📂 Quản lý Từ Điển (Các ca đã cập nhật)" if lang_ai == "Tiếng Việt" else "📂 Dictionary Management (Manual fixes)"
@@ -725,7 +748,14 @@ else:
                         
                     st.dataframe(dict_df, use_container_width=True)
                     dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
-                    dl_btn = "⬇️ Tải file Từ Điển (CSV)" if lang_ai == "Tiếng Việt" else "⬇️ Download Dictionary (CSV)"
-                    st.download_button(dl_btn, data=dict_csv, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.csv", mime="text/csv")
+                    
+                    dict_xls_buffer = io.BytesIO()
+                    with pd.ExcelWriter(dict_xls_buffer, engine='openpyxl') as writer:
+                        dict_df.to_excel(writer, index=False)
+                    dict_xls_data = dict_xls_buffer.getvalue()
+                    
+                    dl_d1, dl_d2 = st.columns(2)
+                    dl_d1.download_button("⬇️ CSV" if lang_ai == "English" else "⬇️ Tải CSV", data=dict_csv, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.csv", mime="text/csv", use_container_width=True)
+                    dl_d2.download_button("⬇️ EXCEL" if lang_ai == "English" else "⬇️ Tải EXCEL", data=dict_xls_data, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 else:
                     st.info("Từ điển hiện đang trống." if lang_ai == "Tiếng Việt" else "Dictionary is empty.")
