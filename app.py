@@ -367,9 +367,11 @@ if "CŨ ➡️ MỚI" in main_mode:
             tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list)
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
-                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist()))
+                huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
+                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + huyen_list)
                 if huyen_sel != "-- Chọn --":
-                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist()))
+                    xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
+                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + xa_list)
             
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
@@ -429,6 +431,16 @@ if "CŨ ➡️ MỚI" in main_mode:
             with c2:
                 csv_data = pd.DataFrame(st.session_state.app_data_excel)[['old', 'new', 'notes']].rename(columns={'old': 'Địa chỉ Gốc', 'new': 'Địa chỉ Mới', 'notes': 'Ghi chú'}).to_csv(index=False, encoding='utf-8-sig')
                 st.download_button("📥 TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="ChuyenDoi_Excel_Clean.csv", mime="text/csv", type="primary")
+                
+            # --- TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN ---
+            with st.expander("📂 Quản lý Từ Điển Hệ Thống (Các ca đã sửa tay)"):
+                if st.session_state.dict_cu_moi:
+                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_cu_moi, orient='index').reset_index().rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                    st.dataframe(dict_df, use_container_width=True)
+                    dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button("⬇️ Tải file Từ Điển (CSV)", data=dict_csv, file_name="TuDien_Cu_Moi.csv", mime="text/csv")
+                else:
+                    st.info("Từ điển hiện đang trống.")
 
 # ------------------------------------------
 # PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (OFFLINE 100%)
@@ -555,3 +567,13 @@ else:
             with c2:
                 csv_data = pd.DataFrame(st.session_state.app_data_moi_cu)[['old', 'new', 'confidence']].rename(columns={'old': 'Địa chỉ MỚI', 'new': 'Địa chỉ CŨ', 'confidence': 'Trạng thái'}).to_csv(index=False, encoding='utf-8-sig')
                 st.download_button("📥 TẢI FILE KẾT QUẢ CSV", data=csv_data, file_name="Ket_Qua_Moi_Cu.csv", mime="text/csv", type="primary")
+
+            # --- TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN ---
+            with st.expander("📂 Quản lý Từ Điển Hệ Thống (Các ca đã sửa tay)"):
+                if st.session_state.dict_moi_cu:
+                    dict_df = pd.DataFrame.from_dict(st.session_state.dict_moi_cu, orient='index').reset_index().rename(columns={'index': 'Địa chỉ Gốc', 'new': 'Địa chỉ Đã sửa', 'notes': 'Trạng thái'})
+                    st.dataframe(dict_df, use_container_width=True)
+                    dict_csv = dict_df.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button("⬇️ Tải file Từ Điển (CSV)", data=dict_csv, file_name="TuDien_Moi_Cu.csv", mime="text/csv")
+                else:
+                    st.info("Từ điển hiện đang trống.")
