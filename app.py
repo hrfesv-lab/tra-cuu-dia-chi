@@ -9,7 +9,7 @@ from streamlit_option_menu import option_menu
 import time
 
 # ==========================================
-# 1. CÀI ĐẶT TRANG & CSS
+# 1. CÀI ĐẶT TRANG, CSS & NGÔN NGỮ TOÀN CỤC
 # ==========================================
 st.set_page_config(page_title="Công cụ Chuyển đổi Địa chỉ", page_icon="📍", layout="wide")
 
@@ -31,8 +31,39 @@ hide_st_style = """
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
+# Khởi tạo dữ liệu
 if 'app_data_excel' not in st.session_state: st.session_state.app_data_excel = []
 if 'app_data_moi_cu' not in st.session_state: st.session_state.app_data_moi_cu = []
+if 'app_lang' not in st.session_state: st.session_state.app_lang = "vi"
+
+# Hàm hỗ trợ song ngữ
+def _t(vi_str, en_str):
+    return vi_str if st.session_state.app_lang == "vi" else en_str
+
+# ==========================================
+# THIẾT KẾ HEADER (Tiêu đề căn giữa & Nút Ngôn ngữ góc phải)
+# ==========================================
+col_empty, col_title, col_lang = st.columns([1.5, 5, 2.5])
+with col_title:
+    st.markdown(f"<h1 style='text-align: center; font-size: 36px; padding-top: 10px;'>{_t('CHUYỂN ĐỔI ĐỊA CHỈ HÀNH CHÍNH', 'ADMINISTRATIVE ADDRESS CONVERSION')}</h1>", unsafe_allow_html=True)
+with col_lang:
+    if st.session_state.app_lang == "vi":
+        lang_opts = ["Tiếng Việt", "Tiếng Anh"]
+        default_index = 0
+        label = "Lựa chọn ngôn ngữ:"
+    else:
+        lang_opts = ["Vietnamese", "English"]
+        default_index = 1
+        label = "Select Language:"
+        
+    selected_lang = st.radio(label, options=lang_opts, index=default_index, horizontal=True)
+    # Xử lý khi người dùng đổi ngôn ngữ
+    new_lang = "vi" if selected_lang in ["Tiếng Việt", "Vietnamese"] else "en"
+    if new_lang != st.session_state.app_lang:
+        st.session_state.app_lang = new_lang
+        st.rerun()
+
+st.markdown("<hr style='margin-top: 5px; margin-bottom: 25px;'>", unsafe_allow_html=True)
 
 # ==========================================
 # 2. HỆ THỐNG TỪ ĐIỂN SỬA TAY VĨNH VIỄN
@@ -312,19 +343,15 @@ def build_en_part(name, unit):
 
 def translate_addr_en(addr):
     if not isinstance(addr, str) or not addr: return addr
-    
     addr = addr.replace("[*Vui lòng tra cứu Phường/Xã cũ tại web UBND*]", "SPECIAL_WARN_1")
     addr = addr.replace("[*Không khớp CSDL*]", "SPECIAL_WARN_2")
-    
     parts = [p.strip() for p in addr.split(',')]
     en_parts = []
-    
     for p in parts:
         if not p: continue
         if p in ["SPECIAL_WARN_1", "SPECIAL_WARN_2"]:
             en_parts.append(p)
             continue
-            
         p_lower = p.lower()
         if p_lower.startswith('tỉnh '): 
             name = remove_vn_accents(p[5:].strip()).title()
@@ -405,13 +432,14 @@ def translate_note_en(note):
     return remove_vn_accents(note)
 
 # ==========================================
-# 5. GIAO DIỆN CHÍNH
+# MENU CHÍNH VÀ LUỒNG ĐIỀU HƯỚNG
 # ==========================================
-st.markdown("<h1 style='text-align: center;'>CHUYỂN ĐỔI ĐỊA CHỈ HÀNH CHÍNH</h1>", unsafe_allow_html=True)
+mode_cu_moi = _t("Địa chỉ cũ - Địa chỉ mới", "Old Address - New Address")
+mode_moi_cu = _t("Địa chỉ mới - Địa chỉ cũ", "New Address - Old Address")
 
 main_mode = option_menu(
     menu_title=None,
-    options=["Địa chỉ cũ - Địa chỉ mới", "Địa chỉ mới - Địa chỉ cũ"],
+    options=[mode_cu_moi, mode_moi_cu],
     icons=["rocket-takeoff", "database"],
     orientation="horizontal",
     styles={
@@ -422,21 +450,26 @@ main_mode = option_menu(
     }
 )
 
+tab_1 = _t("Chuyển đổi hàng loạt", "Batch Conversion")
+tab_2 = _t("Sửa lỗi dữ liệu", "Fix Data Errors")
+tab_3 = _t("Xuất file Excel/CSV", "Export Excel/CSV")
+
 # ------------------------------------------
 # PHÂN HỆ 1: CHUYỂN CŨ -> MỚI
 # ------------------------------------------
-if main_mode == "Địa chỉ cũ - Địa chỉ mới":
-    sub_mode_excel = option_menu(
+if main_mode == mode_cu_moi:
+    sub_mode = option_menu(
         menu_title=None,
-        options=["Chuyển đổi hàng loạt", "Sửa lỗi dữ liệu", "Xuất file Excel/CSV"],
+        options=[tab_1, tab_2, tab_3],
         icons=["cloud-upload", "tools", "download"],
         orientation="horizontal",
         styles={"container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px", "border": "1px solid #e9ecef"}, "icon": {"font-size": "13px"}, "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"}, "nav-link-selected": {"background-color": "#ffffff", "color": "#198754", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"}}
     )
 
-    if sub_mode_excel == "Chuyển đổi hàng loạt":
-        input_text = st.text_area("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", height=180, placeholder="Ví dụ:\nPhường 1, Quận 3, TP HCM\nXã Tân Bình, Huyện Châu Thành, Tỉnh Đồng Tháp")
-        if st.button("⚡ Bắt đầu chuyển đổi", type="primary", use_container_width=True):
+    if sub_mode == tab_1:
+        plh = _t("Ví dụ:\nPhường 1, Quận 3, TP HCM\nXã Tân Bình, Huyện Châu Thành, Tỉnh Đồng Tháp", "Example:\nPhuong 1, Quan 3, TP HCM\nXa Tan Binh, Huyen Chau Thanh, Dong Thap")
+        input_text = st.text_area(_t("Nhập danh sách địa chỉ cũ (mỗi địa chỉ 1 dòng):", "Enter old address list (one per line):"), height=180, placeholder=plh)
+        if st.button(_t("⚡ Bắt đầu chuyển đổi", "⚡ Start Conversion"), type="primary", use_container_width=True):
             if input_text.strip():
                 queries = [q.strip() for q in input_text.split('\n') if q.strip()]
                 st.session_state.app_data_excel = []
@@ -449,59 +482,57 @@ if main_mode == "Địa chỉ cũ - Địa chỉ mới":
                 
         if st.session_state.app_data_excel:
             errs = sum(1 for d in st.session_state.app_data_excel if d['is_error'])
-            st.success(f"🎉 Hoàn tất {len(st.session_state.app_data_excel)} dòng. (Có {errs} dòng bị lỗi). Sang Tab 'Xuất file Excel/CSV' để rà soát.")
+            st.success(_t(f"🎉 Hoàn tất {len(st.session_state.app_data_excel)} dòng. (Có {errs} dòng bị lỗi). Sang Tab 'Xuất file Excel/CSV' để rà soát.",
+                          f"🎉 Completed {len(st.session_state.app_data_excel)} rows. ({errs} errors found). Go to 'Export Excel/CSV' tab to review."))
 
-    elif sub_mode_excel == "Sửa lỗi dữ liệu":
+    elif sub_mode == tab_2:
         error_items = [d for d in st.session_state.app_data_excel if d['is_error']]
         
         if not error_items: 
-            st.info("Mọi dữ liệu đang sạch! (Nếu phát hiện dòng nào sai sót lúc kiểm tra, hãy tích ô Sửa dữ liệu ở Tab Xuất Dữ Liệu)")
+            st.info(_t("Mọi dữ liệu đang sạch! (Nếu phát hiện dòng nào sai sót lúc kiểm tra, hãy tích ô Sửa dữ liệu ở Tab Xuất Dữ Liệu)", "Data is clean! (Check the 'Fix Data' box in the Export Tab to push errors here)"))
         else:
             err_dict = {i['id']: i['old'] for i in error_items}
-            sel_id = st.selectbox("Chọn địa chỉ cần cấp cứu:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
+            sel_id = st.selectbox(_t("Chọn địa chỉ cần cấp cứu:", "Select address to fix:"), options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
             sel_item = next(i for i in st.session_state.app_data_excel if i['id'] == sel_id)
             
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].astype(str).dropna().unique().tolist()) if not df.empty else []
-            tinh_sel = c1.selectbox("Tỉnh/Thành cũ", ["-- Chọn --"] + tinh_list, key=f"t_cu_{sel_id}")
+            tinh_sel = c1.selectbox(_t("Tỉnh/Thành cũ", "Old Province/City"), ["-- Chọn --"] + tinh_list, key=f"t_cu_{sel_id}")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
                 huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
-                huyen_sel = c2.selectbox("Quận/Huyện cũ", ["-- Chọn --"] + huyen_list, key=f"h_cu_{sel_id}")
+                huyen_sel = c2.selectbox(_t("Quận/Huyện cũ", "Old District"), ["-- Chọn --"] + huyen_list, key=f"h_cu_{sel_id}")
                 if huyen_sel != "-- Chọn --":
                     xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
-                    xa_sel = c3.selectbox("Phường/Xã cũ", ["-- Chọn --"] + xa_list, key=f"x_cu_{sel_id}")
+                    xa_sel = c3.selectbox(_t("Phường/Xã cũ", "Old Ward/Commune"), ["-- Chọn --"] + xa_list, key=f"x_cu_{sel_id}")
             
             if xa_sel != "-- Chọn --":
                 exact_row = df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel) & (df['Tên Xã cũ'] == xa_sel)].iloc[0]
                 sug_addr = force_convert_address(sel_item['old'], exact_row)
-                final_edit = st.text_input("✍️ Chỉnh sửa lần cuối:", value=sug_addr, key=f"e_cu_{sel_id}")
+                final_edit = st.text_input(_t("✍️ Chỉnh sửa lần cuối:", "✍️ Final edit:"), value=sug_addr, key=f"e_cu_{sel_id}")
                 
-                if st.button("💾 Lưu kết quả & Nạp vào Từ điển", type="primary"):
+                if st.button(_t("💾 Lưu kết quả & Nạp vào Từ điển", "💾 Save & Add to Dictionary"), type="primary"):
                     for d in st.session_state.app_data_excel:
                         if d['id'] == sel_id:
                             d.update({'new': final_edit, 'is_error': False, 'notes': "✅ Lấy từ Từ điển"})
-                    
                     st.session_state.dict_cu_moi[sel_item['old']] = {'new': final_edit, 'notes': '✅ Lấy từ Từ điển'}
                     save_dict(st.session_state.dict_cu_moi, DICT_CU_MOI)
-                    st.success("Đã ghi nhớ vĩnh viễn vào hệ thống!")
+                    st.success(_t("Đã ghi nhớ vĩnh viễn vào hệ thống!", "Saved permanently to the system!"))
                     time.sleep(1)
                     st.rerun()
 
-    elif sub_mode_excel == "Xuất file Excel/CSV":
+    elif sub_mode == tab_3:
         if not st.session_state.app_data_excel:
-            st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!")
+            st.info(_t("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!", "👈 Run Batch Conversion in the first tab!"))
         else:
-            st.markdown("<h4 style='text-align: center;'>BẢNG KIỂM TRA VÀ XUẤT DỮ LIỆU</h4>", unsafe_allow_html=True)
-            
-            lang_excel = st.radio("Lựa chọn ngôn ngữ/ Select Language:", ["Tiếng Việt", "English"], horizontal=True)
+            st.markdown(f"<h4 style='text-align: center;'>{_t('BẢNG KIỂM TRA VÀ XUẤT DỮ LIỆU', 'DATA CHECK AND EXPORT TABLE')}</h4>", unsafe_allow_html=True)
             
             df_show = pd.DataFrame(st.session_state.app_data_excel)
             if 'Sửa dữ liệu' not in df_show.columns: df_show.insert(0, 'Sửa dữ liệu', False)
             cols = ['Sửa dữ liệu', 'id', 'old', 'new', 'notes', 'is_error']
             df_display = df_show[cols].copy()
             
-            if lang_excel == "English":
+            if st.session_state.app_lang == "en":
                 df_display['old'] = df_display['old'].apply(translate_addr_en)
                 df_display['new'] = df_display['new'].apply(translate_addr_en)
                 df_display['notes'] = df_display['notes'].apply(translate_note_en)
@@ -523,7 +554,7 @@ if main_mode == "Địa chỉ cũ - Địa chỉ mới":
             
             c1, c2 = st.columns([1, 2])
             with c1:
-                btn_push = "Chuyển về trang sửa" if lang_excel == "Tiếng Việt" else "Move to Fix Page"
+                btn_push = _t("Chuyển về trang sửa", "Move to Fix Page")
                 if st.button(btn_push, type="secondary"):
                     count_pushed = 0
                     for index, row in edited_df.iterrows():
@@ -534,10 +565,10 @@ if main_mode == "Địa chỉ cũ - Địa chỉ mới":
                                     item['notes'] = "Cần sửa tay"
                                     count_pushed += 1
                     if count_pushed > 0:
-                        st.success(f"✅ Đã chuyển {count_pushed} dòng về trang sửa!" if lang_excel == "Tiếng Việt" else f"✅ Pushed {count_pushed} rows for manual fix!")
+                        st.success(_t(f"✅ Đã chuyển {count_pushed} dòng về trang sửa!", f"✅ Pushed {count_pushed} rows for manual fix!"))
                         st.rerun()
             with c2:
-                if lang_excel == "English":
+                if st.session_state.app_lang == "en":
                     csv_df = df_display[['old', 'new', 'notes']].rename(columns={'old': 'Original Address', 'new': 'Converted Address', 'notes': 'Notes'})
                     btn_csv, btn_xls = "📥 DOWNLOAD CSV", "📥 DOWNLOAD EXCEL"
                     fname_csv, fname_xls = "Converted_Excel_EN.csv", "Converted_Excel_EN.xlsx"
@@ -557,11 +588,10 @@ if main_mode == "Địa chỉ cũ - Địa chỉ mới":
                 d1.download_button(btn_csv, data=csv_data, file_name=fname_csv, mime="text/csv", type="primary", use_container_width=True)
                 d2.download_button(btn_xls, data=excel_data, file_name=fname_xls, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
-            expander_title = "Cập nhật dữ liệu" if lang_excel == "Tiếng Việt" else "Update Data"
-            with st.expander(expander_title):
+            with st.expander(_t("Cập nhật dữ liệu", "Update Data")):
                 if st.session_state.dict_cu_moi:
                     dict_df = pd.DataFrame.from_dict(st.session_state.dict_cu_moi, orient='index').reset_index()
-                    if lang_excel == "English":
+                    if st.session_state.app_lang == "en":
                         dict_df['index'] = dict_df['index'].apply(translate_addr_en)
                         dict_df['new'] = dict_df['new'].apply(translate_addr_en)
                         dict_df['notes'] = dict_df['notes'].apply(translate_note_en)
@@ -578,27 +608,31 @@ if main_mode == "Địa chỉ cũ - Địa chỉ mới":
                     dict_xls_data = dict_xls_buffer.getvalue()
                     
                     dl_d1, dl_d2 = st.columns(2)
-                    dl_d1.download_button("⬇️ CSV" if lang_excel == "English" else "⬇️ Tải CSV", data=dict_csv, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.csv", mime="text/csv", use_container_width=True)
-                    dl_d2.download_button("⬇️ EXCEL" if lang_excel == "English" else "⬇️ Tải EXCEL", data=dict_xls_data, file_name=f"TuDien_Cu_Moi_{lang_excel[:2]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    dl_btn_csv = "⬇️ CSV" if st.session_state.app_lang == "en" else "⬇️ Tải CSV"
+                    dl_btn_xls = "⬇️ EXCEL" if st.session_state.app_lang == "en" else "⬇️ Tải EXCEL"
+                    dl_d1.download_button(dl_btn_csv, data=dict_csv, file_name=f"TuDien_Cu_Moi_{st.session_state.app_lang}.csv", mime="text/csv", use_container_width=True)
+                    dl_d2.download_button(dl_btn_xls, data=dict_xls_data, file_name=f"TuDien_Cu_Moi_{st.session_state.app_lang}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 else:
-                    st.info("Từ điển hiện đang trống." if lang_excel == "Tiếng Việt" else "Dictionary is empty.")
+                    st.info(_t("Từ điển hiện đang trống.", "Dictionary is empty."))
 
 # ------------------------------------------
 # PHÂN HỆ 2: CHUYỂN MỚI -> CŨ (OFFLINE 100%)
 # ------------------------------------------
-elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
+elif main_mode == mode_moi_cu:
     sub_mode_ai = option_menu(
         menu_title=None,
-        options=["Chuyển đổi hàng loạt", "Sửa lỗi dữ liệu", "Xuất file Excel/CSV"],
+        options=[tab_1, tab_2, tab_3],
         icons=["lightning", "tools", "download"],
         orientation="horizontal",
         styles={"container": {"padding": "3px", "background-color": "#f8f9fa", "border-radius": "8px", "margin-bottom": "15px"}, "icon": {"font-size": "13px"}, "nav-link": {"font-size": "13px", "border-radius": "6px", "padding": "6px 15px"}, "nav-link-selected": {"background-color": "#ffffff", "color": "#0d6efd", "font-weight": "600", "box-shadow": "0px 1px 4px rgba(0,0,0,0.05)"}}
     )
 
-    if sub_mode_ai == "Chuyển đổi hàng loạt":
-        st.warning("⚠️ CHÚ Ý: Chế độ này dùng CSDL Offline siêu tốc. Nếu khu vực có xã sáp nhập phức tạp, hệ thống sẽ trả về Cảnh báo và yêu cầu tra cứu Phường/Xã cũ tại web của UBND.")
-        input_text_ai = st.text_area("Nhập danh sách địa chỉ MỚI (Mỗi địa chỉ 1 dòng):", height=180, placeholder="Ví dụ:\n1118 Kha Vạn Cân, Phường Thủ Đức, TP HCM\nK29/2 Nguyễn Như Đãi, Phường Cẩm Lệ, Đà Nẵng")
-        if st.button("⏪ Bắt đầu Xử lý Offline", type="primary"):
+    if sub_mode_ai == tab_1:
+        st.warning(_t("⚠️ CHÚ Ý: Chế độ này dùng CSDL Offline siêu tốc. Nếu khu vực có xã sáp nhập phức tạp, hệ thống sẽ trả về Cảnh báo và yêu cầu tra cứu Phường/Xã cũ tại web của UBND.",
+                      "⚠️ NOTE: Offline DB used. If complex splits exist, system returns Warning and requires manual Gov website check."))
+        plh2 = _t("Ví dụ:\n1118 Kha Vạn Cân, Phường Thủ Đức, TP HCM\nK29/2 Nguyễn Như Đãi, Phường Cẩm Lệ, Đà Nẵng", "Example:\n1118 Kha Van Can, Thu Duc Ward, TP HCM")
+        input_text_ai = st.text_area(_t("Nhập danh sách địa chỉ MỚI (Mỗi địa chỉ 1 dòng):", "Enter NEW address list (one per line):"), height=180, placeholder=plh2)
+        if st.button(_t("⏪ Bắt đầu Xử lý Offline", "⏪ Start Offline Process"), type="primary"):
             if input_text_ai.strip():
                 queries = [q.strip() for q in input_text_ai.split('\n') if q.strip()]
                 st.session_state.app_data_moi_cu = []
@@ -611,61 +645,60 @@ elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
 
         if st.session_state.app_data_moi_cu:
             warns = sum(1 for d in st.session_state.app_data_moi_cu if d['is_error'])
-            st.success(f"🎉 Hoàn tất {len(st.session_state.app_data_moi_cu)} dòng! (Có {warns} dòng bị Cảnh báo/Lỗi. Sang Tab 'Xuất file Excel/CSV' để rà soát)")
+            st.success(_t(f"🎉 Hoàn tất {len(st.session_state.app_data_moi_cu)} dòng! (Có {warns} dòng bị Cảnh báo/Lỗi. Sang Tab 'Xuất file Excel/CSV' để rà soát)",
+                          f"🎉 Completed {len(st.session_state.app_data_moi_cu)} rows! ({warns} warnings/errors. Go to 'Export' tab to review)"))
 
-    elif sub_mode_ai == "Sửa lỗi dữ liệu":
+    elif sub_mode_ai == tab_2:
         error_items = [d for d in st.session_state.app_data_moi_cu if d.get('is_error', False)]
         
         if not error_items: 
-            st.info("Mọi dữ liệu đang sạch! (Nếu bạn biết 1 địa chỉ Mới tương ứng với địa chỉ Cũ nào, hãy sang Tab 'Xuất file Excel/CSV' tích ô Sửa dữ liệu để đẩy về đây)")
+            st.info(_t("Mọi dữ liệu đang sạch! (Nếu bạn biết 1 địa chỉ Mới tương ứng với địa chỉ Cũ nào, hãy sang Tab 'Xuất file Excel/CSV' tích ô Sửa dữ liệu để đẩy về đây)",
+                       "Data is clean! (Check 'Fix Data' in Export tab to push items here)"))
         else:
             err_dict = {i['id']: i['old'] for i in error_items}
-            sel_id = st.selectbox("Chọn địa chỉ MỚI cần cập nhật thông tin CŨ:", options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
+            sel_id = st.selectbox(_t("Chọn địa chỉ MỚI cần cập nhật thông tin CŨ:", "Select NEW address to update OLD info:"), options=list(err_dict.keys()), format_func=lambda x: err_dict[x])
             sel_item = next(i for i in st.session_state.app_data_moi_cu if i['id'] == sel_id)
             
             c1, c2, c3 = st.columns(3)
             tinh_list = sorted(df['Tỉnh cũ'].astype(str).dropna().unique().tolist()) if not df.empty else []
-            tinh_sel = c1.selectbox("Tỉnh/Thành CŨ", ["-- Chọn --"] + tinh_list, key=f"t_mc_{sel_id}")
+            tinh_sel = c1.selectbox(_t("Tỉnh/Thành CŨ", "OLD Province/City"), ["-- Chọn --"] + tinh_list, key=f"t_mc_{sel_id}")
             huyen_sel, xa_sel = "-- Chọn --", "-- Chọn --"
             if tinh_sel != "-- Chọn --":
                 huyen_list = sorted(df[df['Tỉnh cũ'] == tinh_sel]['Huyện cũ'].dropna().unique().tolist())
-                huyen_sel = c2.selectbox("Quận/Huyện CŨ", ["-- Chọn --"] + huyen_list, key=f"h_mc_{sel_id}")
+                huyen_sel = c2.selectbox(_t("Quận/Huyện CŨ", "OLD District"), ["-- Chọn --"] + huyen_list, key=f"h_mc_{sel_id}")
                 if huyen_sel != "-- Chọn --":
                     xa_list = sorted(df[(df['Tỉnh cũ'] == tinh_sel) & (df['Huyện cũ'] == huyen_sel)]['Tên Xã cũ'].dropna().unique().tolist())
-                    xa_sel = c3.selectbox("Phường/Xã CŨ", ["-- Chọn --"] + xa_list, key=f"x_mc_{sel_id}")
+                    xa_sel = c3.selectbox(_t("Phường/Xã CŨ", "OLD Ward/Commune"), ["-- Chọn --"] + xa_list, key=f"x_mc_{sel_id}")
             
             if xa_sel != "-- Chọn --":
                 prefix, _, _, _ = extract_address_components(normalize_for_search(normalize_formatting(sel_item['old'])))
                 suggested_addr = f"{prefix}, {xa_sel}, {huyen_sel}, {tinh_sel}" if prefix else f"{xa_sel}, {huyen_sel}, {tinh_sel}"
                 suggested_addr = re.sub(r',\s*,', ',', suggested_addr).strip(', ')
                 
-                final_edit = st.text_input("✍️ Chỉnh sửa địa chỉ CŨ hoàn chỉnh:", value=suggested_addr, key=f"e_mc_{sel_id}")
+                final_edit = st.text_input(_t("✍️ Chỉnh sửa địa chỉ CŨ hoàn chỉnh:", "✍️ Final OLD address edit:"), value=suggested_addr, key=f"e_mc_{sel_id}")
                 
-                if st.button("💾 Lưu kết quả & Nạp vào Từ điển", type="primary"):
+                if st.button(_t("💾 Lưu kết quả & Nạp vào Từ điển", "💾 Save & Add to Dictionary"), type="primary"):
                     for d in st.session_state.app_data_moi_cu:
                         if d['id'] == sel_id:
                             d.update({'new': final_edit, 'is_error': False, 'confidence': "✅ Lấy từ Từ điển"})
-                    
                     st.session_state.dict_moi_cu[sel_item['old']] = {'new': final_edit, 'notes': '✅ Lấy từ Từ điển'}
                     save_dict(st.session_state.dict_moi_cu, DICT_MOI_CU)
-                    st.success("Đã ghi nhớ vĩnh viễn vào hệ thống Từ điển Mới ➡️ Cũ!")
+                    st.success(_t("Đã ghi nhớ vĩnh viễn vào hệ thống Từ điển Mới ➡️ Cũ!", "Saved permanently to New ➡️ Old Dictionary!"))
                     time.sleep(1)
                     st.rerun()
 
-    elif sub_mode_ai == "Xuất file Excel/CSV":
+    elif sub_mode_ai == tab_3:
         if not st.session_state.app_data_moi_cu:
-            st.info("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!")
+            st.info(_t("👈 Hãy chạy tính năng chuyển đổi hàng loạt ở Tab đầu tiên!", "👈 Run Batch Conversion in the first tab!"))
         else:
-            st.markdown("<h4 style='text-align: center;'>BẢNG KIỂM TRA VÀ XUẤT DỮ LIỆU</h4>", unsafe_allow_html=True)
-            
-            lang_ai = st.radio("Lựa chọn ngôn ngữ/ Select Language:", ["Tiếng Việt", "English"], horizontal=True)
+            st.markdown(f"<h4 style='text-align: center;'>{_t('BẢNG KIỂM TRA VÀ XUẤT DỮ LIỆU', 'DATA CHECK AND EXPORT TABLE')}</h4>", unsafe_allow_html=True)
             
             df_show = pd.DataFrame(st.session_state.app_data_moi_cu)
             if 'Sửa dữ liệu' not in df_show.columns: df_show.insert(0, 'Sửa dữ liệu', False)
             cols = ['Sửa dữ liệu', 'id', 'old', 'new', 'confidence', 'is_error']
             df_display = df_show[cols].copy()
             
-            if lang_ai == "English":
+            if st.session_state.app_lang == "en":
                 df_display['old'] = df_display['old'].apply(translate_addr_en)
                 df_display['new'] = df_display['new'].apply(translate_addr_en)
                 df_display['confidence'] = df_display['confidence'].apply(translate_note_en)
@@ -687,7 +720,7 @@ elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
             
             c1, c2 = st.columns([1, 2])
             with c1:
-                btn_push = "Chuyển về trang sửa" if lang_ai == "Tiếng Việt" else "Move to Fix Page"
+                btn_push = _t("Chuyển về trang sửa", "Move to Fix Page")
                 if st.button(btn_push, type="secondary"):
                     count_pushed = 0
                     for index, row in edited_df.iterrows():
@@ -698,10 +731,10 @@ elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
                                     item['confidence'] = "Cần cập nhật Từ điển"
                                     count_pushed += 1
                     if count_pushed > 0:
-                        st.success(f"✅ Đã chuyển {count_pushed} dòng về trang sửa!" if lang_ai == "Tiếng Việt" else f"✅ Pushed {count_pushed} rows for manual fix!")
+                        st.success(_t(f"✅ Đã chuyển {count_pushed} dòng về trang sửa!", f"✅ Pushed {count_pushed} rows for manual fix!"))
                         st.rerun()
             with c2:
-                if lang_ai == "English":
+                if st.session_state.app_lang == "en":
                     csv_df = df_display[['old', 'new', 'confidence']].rename(columns={'old': 'New Address', 'new': 'Old Address', 'confidence': 'Status'})
                     btn_csv, btn_xls = "📥 DOWNLOAD CSV", "📥 DOWNLOAD EXCEL"
                     fname_csv, fname_xls = "Converted_Moi_Cu_EN.csv", "Converted_Moi_Cu_EN.xlsx"
@@ -721,11 +754,10 @@ elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
                 d1.download_button(btn_csv, data=csv_data, file_name=fname_csv, mime="text/csv", type="primary", use_container_width=True)
                 d2.download_button(btn_xls, data=excel_data, file_name=fname_xls, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
-            expander_title = "Cập nhật dữ liệu" if lang_ai == "Tiếng Việt" else "Update Data"
-            with st.expander(expander_title):
+            with st.expander(_t("Cập nhật dữ liệu", "Update Data")):
                 if st.session_state.dict_moi_cu:
                     dict_df = pd.DataFrame.from_dict(st.session_state.dict_moi_cu, orient='index').reset_index()
-                    if lang_ai == "English":
+                    if st.session_state.app_lang == "en":
                         dict_df['index'] = dict_df['index'].apply(translate_addr_en)
                         dict_df['new'] = dict_df['new'].apply(translate_addr_en)
                         dict_df['notes'] = dict_df['notes'].apply(translate_note_en)
@@ -742,7 +774,9 @@ elif main_mode == "Địa chỉ mới - Địa chỉ cũ":
                     dict_xls_data = dict_xls_buffer.getvalue()
                     
                     dl_d1, dl_d2 = st.columns(2)
-                    dl_d1.download_button("⬇️ CSV" if lang_ai == "English" else "⬇️ Tải CSV", data=dict_csv, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.csv", mime="text/csv", use_container_width=True)
-                    dl_d2.download_button("⬇️ EXCEL" if lang_ai == "English" else "⬇️ Tải EXCEL", data=dict_xls_data, file_name=f"TuDien_Moi_Cu_{lang_ai[:2]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    dl_btn_csv = "⬇️ CSV" if st.session_state.app_lang == "en" else "⬇️ Tải CSV"
+                    dl_btn_xls = "⬇️ EXCEL" if st.session_state.app_lang == "en" else "⬇️ Tải EXCEL"
+                    dl_d1.download_button(dl_btn_csv, data=dict_csv, file_name=f"TuDien_Moi_Cu_{st.session_state.app_lang}.csv", mime="text/csv", use_container_width=True)
+                    dl_d2.download_button(dl_btn_xls, data=dict_xls_data, file_name=f"TuDien_Moi_Cu_{st.session_state.app_lang}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 else:
-                    st.info("Từ điển hiện đang trống." if lang_ai == "Tiếng Việt" else "Dictionary is empty.")
+                    st.info(_t("Từ điển hiện đang trống.", "Dictionary is empty."))
